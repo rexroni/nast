@@ -17,7 +17,7 @@
 #include <unistd.h>
 #include <wchar.h>
 
-#include "st.h"
+#include "nast.h"
 #include "win.h"
 
 #if   defined(__linux)
@@ -88,7 +88,9 @@ enum escape_state {
 
 typedef struct {
     Glyph attr; /* current char attributes */
+    // position in TLine, not RLine
     int x;
+    // y position, relative to start of ring buffer
     int y;
     char state;
 } TCursor;
@@ -115,6 +117,22 @@ typedef struct {
 typedef struct {
     int row;      /* nb row */
     int col;      /* nb col */
+
+    // font stuff
+    PangoFontDescription *desc;
+    double grid_w;
+    double grid_h;
+
+    // rendered dimensions, should be checked each re-render
+    double render_w;
+    double render_h;
+
+    TLine **tlines;
+    // ring buffer semantics
+    size_t tlines_cap;
+    size_t tlines_bot;
+    size_t tlines_top;
+
     Line *line;   /* screen */
     Line *alt;    /* alternate screen */
     int *dirty;   /* dirtyness of lines */
@@ -193,7 +211,7 @@ static void tsetdirt(int, int);
 static void tsetscroll(int, int);
 static void tswapscreen(void);
 static void tsetmode(int, int, int *, int);
-static int twrite(const char *, int, int);
+// static int twrite(const char *, int, int);
 static void tfulldirt(void);
 static void tcontrolcode(uchar );
 static void tdectest(char );
@@ -226,6 +244,19 @@ static STREscape strescseq;
 static int iofd = 1;
 static int cmdfd;
 static pid_t pid;
+
+// get the physical index from an offset (a logical index)
+static inline size_t tlines_idx(size_t offset){
+    return (term.tlines_bot + offset) % term.tlines_cap;
+}
+
+static inline size_t tlines_len(void){
+    if(term.tlines_top >= term.tlines_bot){
+        return term.tlines_top - term.tlines_bot + 1;
+    }else{
+        return term.tlines_top + term.tlines_cap - term.tlines_bot + 1;
+    }
+}
 
 static uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
@@ -920,6 +951,7 @@ write_error:
 void
 ttyresize(int tw, int th)
 {
+    printf("resizing to height = T%d\n", th);
     struct winsize w;
 
     w.ws_row = term.row;
@@ -1027,10 +1059,103 @@ treset(void)
     }
 }
 
+int
+tfont(char *font_name, PangoFontDescription **desc_out, double *grid_w_out,
+        double *grid_h_out){
+    /* Check that we can get a font description from the font name and make
+       sure it is monospaced.  Output the description and the grid size.
+       Return 0 on success or -1 on error. */
+    PangoFontDescription *desc = pango_font_description_from_string(font_name);
+    if(!desc){
+        fprintf(stderr, "unable to process font \"%s\"\n", font_name);
+        return -1;
+    }
+
+    // This code segfaults for no apparent reason:
+    // {
+    //     const PangoFontFamily *family =
+    //         pango_font_description_get_family(desc);
+    //     gboolean ans = pango_font_family_is_monospace(family);
+    // }
+
+    // hack: check monospace by comparing layout width of 'm' vs 'i'
+    int w = 1024;
+    int h = 256;
+    cairo_surface_t *srfc =
+        cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+    if(!srfc){
+        die("cairo_image_surface_create(): %s\n", strerror(errno));
+    }
+
+    cairo_t *cr = cairo_create(srfc);
+    if(!cr){
+        die("cairo_create(): %s\n", strerror(errno));
+    }
+
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    if(!layout){
+        die("pango_cairo_create_layout(): %s\n", strerror(errno));
+    }
+
+    PangoRectangle rect;
+
+    pango_layout_set_font_description(layout, desc);
+    pango_layout_set_text(layout, "Mm", 2);
+    pango_layout_get_extents(layout, NULL, &rect);
+    int m_w = rect.width;
+
+    pango_layout_set_font_description(layout, desc);
+    pango_layout_set_text(layout, "Ii", 2);
+    pango_layout_get_extents(layout, NULL, &rect);
+    int i_w = rect.width;
+
+    if(m_w != i_w){
+        fprintf(stderr, "non-monospace font detected: \"%s\"\n", font_name);
+        goto fail;
+    }
+
+    *grid_w_out = ((double)m_w) / 2 / PANGO_SCALE;
+
+    // now measure height
+    pango_layout_set_text(layout, "Áy", 2);
+    pango_layout_get_extents(layout, NULL, &rect);
+    *grid_h_out = ((double)rect.height) / PANGO_SCALE;
+
+    *desc_out = desc;
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    cairo_surface_destroy(srfc);
+
+    return 0;
+
+fail:
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    cairo_surface_destroy(srfc);
+    pango_font_description_free(desc);
+    return -1;
+}
+
 void
-tnew(int col, int row)
+tnew(int col, int row, char *font_name)
 {
     term = (Term){ .c = { .attr = { .fg = defaultfg, .bg = defaultbg } } };
+
+    int ret = tfont(font_name, &term.desc, &term.grid_w, &term.grid_h);
+    if(ret < 0){
+        die("invalid font\n");
+    }
+
+    // allocate history
+    term.tlines_cap = 10000;
+    size_t nbytes = term.tlines_cap * sizeof(*term.tlines);
+    term.tlines = xmalloc(nbytes);
+    // all lines start empty
+    memset(term.tlines, 0, nbytes);
+
+    // start with the first line allocated
+    term.tlines[term.tlines_bot] = tline_new();
+
     tresize(col, row);
     treset();
 }
@@ -1038,10 +1163,11 @@ tnew(int col, int row)
 void
 tswapscreen(void)
 {
-    Line *tmp = term.line;
+    // TODO: support altscreen
+    //Line *tmp = term.line;
 
-    term.line = term.alt;
-    term.alt = tmp;
+    //term.line = term.alt;
+    //term.alt = tmp;
     term.mode ^= MODE_ALTSCREEN;
     tfulldirt();
 }
@@ -1119,14 +1245,21 @@ selscroll(int orig, int n)
 void
 tnewline(int first_col)
 {
-    int y = term.c.y;
-
-    if (y == term.bot) {
-        tscrollup(term.top, 1);
-    } else {
-        y++;
+    // is ring buffer full?
+    if(tlines_len() == term.tlines_cap){
+        // free oldest tline
+        tline_free(&term.tlines[term.top]);
+        // forget the oldest history element
+        term.tlines_top = tlines_idx(term.tlines_cap - 1);
     }
-    tmoveto(first_col ? 0 : term.c.x, y);
+
+    // always shift the bottom index, the top can stay
+    term.tlines_bot = tlines_idx(term.tlines_cap - 1);
+
+    // create a new empty line
+    term.tlines[term.tlines_bot] = tline_new();
+
+    tmoveto(first_col ? 0 : term.c.x, term.c.y);
 }
 
 void
@@ -2403,37 +2536,24 @@ check_control_code:
     if (sel.ob.x != -1 && BETWEEN(term.c.y, sel.ob.y, sel.oe.y))
         selclear();
 
-    gp = &term.line[term.c.y][term.c.x];
-    if (IS_SET(MODE_WRAP) && (term.c.state & CURSOR_WRAPNEXT)) {
-        gp->mode |= ATTR_WRAP;
-        tnewline(1);
-        gp = &term.line[term.c.y][term.c.x];
-    }
+    Glyph g = term.c.attr;
+    g.u = u;
 
-    if (IS_SET(MODE_INSERT) && term.c.x+width < term.col)
-        memmove(gp+width, gp, (term.col - term.c.x - width) * sizeof(Glyph));
-
-    if (term.c.x+width > term.col) {
-        tnewline(1);
-        gp = &term.line[term.c.y][term.c.x];
-    }
-
-    tsetchar(u, &term.c.attr, term.c.x, term.c.y);
-
-    if (width == 2) {
-        gp->mode |= ATTR_WIDE;
-        if (term.c.x+1 < term.col) {
-            gp[1].u = '\0';
-            gp[1].mode = ATTR_WDUMMY;
-        }
-    }
-    if (term.c.x+width < term.col) {
-        tmoveto(term.c.x+width, term.c.y);
-    } else {
-        term.c.state |= CURSOR_WRAPNEXT;
+    TLine *tline = term.tlines[tlines_idx(term.c.y)];
+    if(term.c.x == tline->n_glyphs || IS_SET(MODE_INSERT)){
+        //printf("tline_insert_glyph(%d, %c)\n", term.c.x, (char)g.u);
+        // we are at the end of the line or in insert mode
+        tline_insert_glyph(tline, term.c.x++, g);
+    }else{
+        //printf("tline_set_glyph(%d, %c)\n", term.c.x, (char)g.u);
+        // we should overwrite something
+        tline_set_glyph(tline, term.c.x++, g);
     }
 }
 
+/*
+Read a stream of utf-8, and call tputc on each codepoint.
+*/
 int
 twrite(const char *buf, int buflen, int show_ctrl)
 {
@@ -2596,4 +2716,271 @@ redraw(void)
 {
     tfulldirt();
     draw();
+}
+
+//////
+
+// copy a WxH sub rectangle of the source image to x,y in the destination image
+void copy_rectangle(cairo_t *cr, cairo_surface_t *src, double x, double y,
+        double w, double h){
+    cairo_save(cr);
+    cairo_set_source_surface(cr, src, x, y);
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_fill(cr);
+    cairo_restore(cr);
+}
+
+
+int format_eq(Glyph a, Glyph b){
+    return a.mode == b.mode && a.fg == b.fg && a.bg == b.bg;
+}
+
+void rline_free(RLine **rline){
+    if(!*rline) return;
+
+    if((*rline)->srfc){
+        cairo_surface_destroy((*rline)->srfc);
+        (*rline)->srfc = NULL;
+    }
+
+    free(*rline);
+    *rline = NULL;
+}
+
+
+// create an RLine with a collection of glyphs, but don't render it until later
+RLine *rline_new(const Glyph *glyphs, size_t n_glyphs){
+    RLine *rline = xmalloc(sizeof(*rline));
+    *rline = (RLine){.glyphs=glyphs, .n_glyphs=n_glyphs};
+    return rline;
+}
+
+
+// render
+double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,
+        double x, size_t start, size_t len){
+    // expand glyphs back into utf8 for pango
+    // TODO: support arbitrary-length lines
+    char utf8[4096];
+    size_t utf8_len = 0;
+    for(size_t i = 0; i < rline->n_glyphs; i++){
+        utf8_len += utf8encode(rline->glyphs[i].u, &utf8[utf8_len]);
+    }
+
+    pango_layout_set_text(layout, utf8, utf8_len);
+
+    cairo_move_to(cr, x, 0);
+    cairo_set_source_rgb(cr, 1, 0, 0);
+
+    pango_cairo_show_layout(cr, layout);
+
+    // now get the width of the text we printed
+    PangoRectangle rect;
+    pango_layout_get_extents(layout, NULL, &rect);
+    double w = ((double)rect.width) / PANGO_SCALE;
+    return x + w;
+}
+
+
+void rline_render(RLine *rline){
+    // handle the zero-width line case
+    if(rline->n_glyphs == 0) return;
+
+    // handle the already-been-rendered case
+    if(rline->srfc) return;
+
+    rline->srfc = cairo_image_surface_create(
+        CAIRO_FORMAT_RGB24, term.render_w, term.grid_h);
+
+    // create cairo context and layout
+    cairo_t *cr = cairo_create(rline->srfc);
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+
+    // set font
+    pango_layout_set_font_description(layout, term.desc);
+
+    double x = 0;
+
+    // break up the text into multiple chunks of common font settings
+    Glyph cur_fmt = rline->glyphs[0];
+    size_t start = 0;
+    size_t i;
+    for(i = 1; i < rline->n_glyphs; i++){
+        if(!format_eq(cur_fmt, rline->glyphs[i])){
+            // found a different format, i-1 was the end of the render box
+            x = rline_subrender(rline, cr, layout, x, start, i - start);
+            start = i;
+        }
+    }
+    // render the final chunk
+    rline_subrender(rline, cr, layout, x, start, i - start);
+    g_object_unref(layout);
+    cairo_destroy(cr);
+}
+
+void rline_draw(RLine *rline, cairo_t *cr, size_t line_offset){
+    // handle the zero-width line case
+    if(rline->n_glyphs == 0) return;
+    copy_rectangle(cr, rline->srfc, 0, term.grid_h * line_offset,
+            term.render_w, term.grid_h);
+}
+
+TLine *tline_new(void){
+    TLine *tline = xmalloc(sizeof(*tline));
+    *tline = (TLine){0};
+
+    // start with a single glyph of capacity
+    tline->glyphs = xmalloc(sizeof(*tline->glyphs));
+    tline->n_glyphs = 0;
+    tline->glyphs_cap = 1;
+
+    // start with a single rline of capacity
+    tline->rlines = xmalloc(sizeof(*tline->rlines));
+    tline->n_rlines = 0;
+    tline->rlines_cap = 1;
+
+    return tline;
+}
+
+void tline_free(TLine **tline){
+    if(!*tline) return;
+
+    for(size_t i = 0; i < (*tline)->n_rlines; i++){
+        rline_free(&(*tline)->rlines[i]);
+    }
+
+    free((*tline)->glyphs);
+
+    free(*tline);
+    *tline = NULL;
+}
+
+
+// undo any rendering that's already been cached
+void tline_unrender(TLine *tline){
+    // free any rlines
+    for(size_t i = 0; i < tline->n_rlines; i++){
+        rline_free(&tline->rlines[i]);
+    }
+    tline->n_rlines = 0;
+}
+
+// insert a glyph before the index
+void tline_insert_glyph(TLine *tline, size_t idx, Glyph g){
+    // if there isn't room, realloc
+    if(tline->n_glyphs == tline->glyphs_cap){
+        tline->glyphs_cap *= 2;
+        tline->glyphs = xrealloc(tline->glyphs, sizeof(*tline->glyphs) * tline->glyphs_cap);
+    }
+
+    memmove(&tline->glyphs[idx+1], &tline->glyphs[idx], tline->n_glyphs - idx);
+
+    tline->n_glyphs++;
+
+    tline->glyphs[idx] = g;
+
+    // mark this line as dirty
+    tline_unrender(tline);
+}
+
+// set a glyph to be something else
+void tline_set_glyph(TLine *tline, size_t idx, Glyph g){
+    // if there isn't room, realloc
+    if(idx == tline->glyphs_cap){
+        tline->glyphs_cap *= 2;
+        tline->glyphs = xrealloc(tline->glyphs, sizeof(*tline->glyphs) * tline->glyphs_cap);
+    }
+
+    tline->glyphs[idx] = g;
+
+    // mark this line as dirty
+    tline_unrender(tline);
+}
+
+// add an unrendered RLine to this tline
+void tline_add_rline(TLine *tline, size_t start, size_t len){
+    if(tline->n_rlines == tline->rlines_cap){
+        tline->rlines_cap *= 2;
+        tline->rlines = xrealloc(tline->rlines, sizeof(*tline->rlines) * tline->rlines_cap);
+    }
+    tline->rlines[tline->n_rlines++] = rline_new(&tline->glyphs[start], len);
+}
+
+// render this terminal line, return the number of render lines still needed
+size_t tline_render(TLine *tline, size_t width, size_t lines_left){
+    /* If we have any rlines, assume they are still valid.  They would all have
+       been freed had tline_unrender() been called. */
+    if(tline->n_rlines == 0 && tline->n_glyphs > 0){
+        // break tline into unrendered rlines
+        size_t start = 0;
+        size_t render_left = term.col;
+        size_t i;
+        for(i = 0; i < tline->n_glyphs; i++){
+            Rune u = tline->glyphs[i].u;
+            // TODO: measure the real width of this character
+            size_t char_width = 1;
+            if(char_width > render_left){
+                // too many characters, break the line here
+                tline_add_rline(tline, start, i - start);
+                start = i;
+                render_left = term.col;
+            }
+            // add this character to the line
+            render_left -= char_width;
+        }
+        tline_add_rline(tline, start, i - start);
+    }
+
+    // render rlines in reverse order
+    for(size_t i = 0; i < tline->n_rlines; i++){
+        rline_render(tline->rlines[tline->n_rlines - i - 1]);
+        if(!--lines_left) break;
+    }
+
+    return lines_left;
+}
+
+size_t tline_draw(TLine *tline, cairo_t *cr, size_t lines_left){
+    // draw rlines in reverse order
+    for(size_t i = 0; i < tline->n_rlines; i++){
+        rline_draw(tline->rlines[tline->n_rlines - i - 1], cr, --lines_left);
+        if(!lines_left) break;
+    }
+    return lines_left;
+}
+
+// delete any rendered artifacts but leave the text alone
+void tunrender(void){
+    for(size_t i = 0; i < tlines_len(); i++){
+        tline_unrender(term.tlines[tlines_idx(i)]);
+    }
+}
+
+void trender(cairo_t *cr, double w, double h){
+    if(w != term.render_w || h != term.render_h){
+        // delete old rendering
+        tunrender();
+        // save new dimensions
+        term.render_w = w;
+        term.render_h = h;
+        term.col = term.render_w / term.grid_w;
+        term.row = term.render_h / term.grid_h;
+    }
+
+    size_t lines_to_render = term.row;
+    for(size_t i = 0; i < tlines_len() && lines_to_render > 0; i++){
+        // get the line at this index
+        TLine *tline = term.tlines[tlines_idx(i)];
+        // render this line
+        lines_to_render = tline_render(tline, term.render_w, lines_to_render);
+    }
+
+    // now draw each line onto the cairo surface
+    lines_to_render = term.row - lines_to_render;
+    for(size_t i = 0; i < tlines_len() && lines_to_render > 0; i++){
+        // get the line at this index
+        TLine *tline = term.tlines[tlines_idx(i)];
+        // draw this line
+        lines_to_render = tline_draw(tline, cr, lines_to_render);
+    }
 }

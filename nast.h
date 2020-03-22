@@ -3,9 +3,16 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <cairo.h>
+#include <pango/pangocairo.h>
+
 /* macros */
+#ifndef MIN
 #define MIN(a, b)        ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
 #define MAX(a, b)        ((a) < (b) ? (b) : (a))
+#endif
 #define LEN(a)            (sizeof(a) / sizeof(a)[0])
 #define BETWEEN(x, a, b)    ((a) <= (x) && (x) <= (b))
 #define DIVCEIL(n, d)        (((n) + ((d) - 1)) / (d))
@@ -67,7 +74,27 @@ typedef struct {
     uint32_t bg;      /* background  */
 } Glyph;
 
-typedef Glyph *Line;
+typedef Glyph* Line;
+
+// render line, one line of rendered text
+typedef struct {
+    cairo_surface_t *srfc;
+    // which characters in the TLine belong in this rendered line
+    const Glyph *glyphs;
+    size_t n_glyphs;
+} RLine;
+
+// terminal line, might get rendered onto many lines
+typedef struct {
+    // one glyph per character
+    Glyph *glyphs;
+    size_t n_glyphs;
+    size_t glyphs_cap;
+    // rendering results (n_rlines == 0 after tline_unrender())
+    RLine **rlines;
+    size_t n_rlines;
+    size_t rlines_cap;
+} TLine;
 
 typedef union {
     int i;
@@ -87,7 +114,7 @@ void sendbreak(const Arg *);
 void toggleprinter(const Arg *);
 
 int tattrset(int);
-void tnew(int, int);
+void tnew(int col, int row, char *font_name);
 void tresize(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
@@ -121,3 +148,15 @@ extern char *termname;
 extern unsigned int tabspaces;
 extern unsigned int defaultfg;
 extern unsigned int defaultbg;
+
+//////
+
+int twrite(const char *, int, int);
+TLine *tline_new(void);
+void tline_free(TLine **tline);
+// insert a glpyh before the index
+void tline_insert_glyph(TLine *tline, size_t idx, Glyph g);
+// set a glyph to be something else
+void tline_set_glyph(TLine *tline, size_t idx, Glyph g);
+
+void trender(cairo_t *cr, double w, double h);
