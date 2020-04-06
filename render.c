@@ -52,6 +52,7 @@ static int cairo_get_lims(cairo_t *cr, int *w, int *h){
     return 0;
 }
 
+// developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-draw
 static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
         gpointer user_data){
     int w, h;
@@ -59,9 +60,43 @@ static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
         die("unable to detect cairo surface dimensions\n");
     }
     trender(cr, w, h);
+
+    // allow other handlers to process the event
     return FALSE;
 }
 
+// developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-key-press-event
+static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
+        gpointer user_data){
+
+    GtkIMContext *im_ctx = user_data;
+    if(gtk_im_context_filter_keypress(im_ctx, event_key)){
+        return TRUE;
+    }
+    switch(event_key->keyval){
+        case GDK_KEY_BackSpace: twrite("\x07", 1, 0); break;
+        default: printf("unhandled key!\n"); return FALSE;
+    }
+    return TRUE;
+}
+
+static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
+    printf("commit!\n");
+    twrite(str, strlen(str), 0);
+    gtk_widget_queue_draw(user_data);
+}
+
+static void im_preedit_start(GtkIMContext *im_ctx, gpointer user_data){
+    printf("preedit start!\n");
+}
+
+static void im_preedit_end(GtkIMContext *im_ctx, gpointer user_data){
+    printf("preedit end!\n");
+}
+
+static void im_preedit_changed(GtkIMContext *im_ctx, gpointer user_data){
+    printf("preedit changed!\n");
+}
 
 int main(int argc, char *argv[]){
     GtkWidget *window;
@@ -74,8 +109,27 @@ int main(int argc, char *argv[]){
     darea = gtk_drawing_area_new();
     gtk_container_add(GTK_CONTAINER(window), darea);
 
+    // GTK input handling: developer.gnome.org/gtk3/stable/chap-input-handling.html
     g_signal_connect(G_OBJECT(darea), "draw", G_CALLBACK(on_draw_event), NULL);
-    g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+
+    // configure the input method
+    GtkIMContext *im_ctx = gtk_im_context_simple_new();
+    if(!im_ctx) die("gtk_im_context_simple_new()\n");
+
+    g_signal_connect(G_OBJECT(im_ctx), "commit", G_CALLBACK(im_commit), darea);
+    g_signal_connect(G_OBJECT(im_ctx), "preedit-end", G_CALLBACK(im_preedit_end), NULL);
+    g_signal_connect(G_OBJECT(im_ctx), "preedit-start", G_CALLBACK(im_preedit_start), NULL);
+    g_signal_connect(G_OBJECT(im_ctx), "preedit-changed", G_CALLBACK(im_preedit_changed), NULL);
+
+    //// get keypresses from the drawing area (does not work)
+    // gtk_widget_add_events(GTK_WIDGET(darea), GDK_KEY_PRESS_MASK);
+    // g_signal_connect(G_OBJECT(darea), "key-press-event", G_CALLBACK(on_key_press), NULL);
+
+    // get keypresses from the window (does work)
+    g_signal_connect(G_OBJECT(window), "key-press-event", G_CALLBACK(on_key_event), im_ctx);
+    g_signal_connect(G_OBJECT(window), "key-release-event", G_CALLBACK(on_key_event), im_ctx);
 
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(window), 400, 400);
