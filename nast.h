@@ -114,14 +114,14 @@ void sendbreak(const Arg *);
 void toggleprinter(const Arg *);
 
 int tattrset(int);
-void tnew(int col, int row, char *font_name);
+void tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size_t));
 void tresize(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
 int ttynew(char *, char *, char *, char **);
 size_t ttyread(void);
 void ttyresize(int, int);
-void ttywrite(const char *, size_t, int);
+void die_on_ttywrite(const char *buf, size_t len);
 
 void resettitle(void);
 

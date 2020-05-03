@@ -324,7 +324,7 @@ zoomreset(const Arg *arg)
 void
 ttysend(const Arg *arg)
 {
-    ttywrite(arg->s, strlen(arg->s), 1);
+    die_on_ttywrite(arg->s, strlen(arg->s));
 }
 
 int
@@ -420,7 +420,7 @@ mousereport(XEvent *e)
         return;
     }
 
-    ttywrite(buf, len, 0);
+    die_on_ttywrite(buf, len);
 }
 
 int
@@ -560,10 +560,10 @@ selnotify(XEvent *e)
         }
 
         if (IS_SET(MODE_BRCKTPASTE) && ofs == 0)
-            ttywrite("\033[200~", 6, 0);
-        ttywrite((char *)data, nitems * format / 8, 1);
+            die_on_ttywrite("\033[200~", 6);
+        die_on_ttywrite((char *)data, nitems * format / 8);
         if (IS_SET(MODE_BRCKTPASTE) && rem == 0)
-            ttywrite("\033[201~", 6, 0);
+            die_on_ttywrite("\033[201~", 6);
         XFree(data);
         /* number of 32-bit chunks returned */
         ofs += nitems * format / 32;
@@ -1714,13 +1714,13 @@ focus(XEvent *ev)
         win.mode |= MODE_FOCUSED;
         xseturgency(0);
         if (IS_SET(MODE_FOCUS))
-            ttywrite("\033[I", 3, 0);
+            die_on_ttywrite("\033[I", 3);
     } else {
         if (xw.ime.xic)
             XUnsetICFocus(xw.ime.xic);
         win.mode &= ~MODE_FOCUSED;
         if (IS_SET(MODE_FOCUS))
-            ttywrite("\033[O", 3, 0);
+            die_on_ttywrite("\033[O", 3);
     }
 }
 
@@ -1795,7 +1795,7 @@ kpress(XEvent *ev)
 
     /* 2. custom keys from config.h */
     if ((customkey = kmap(ksym, e->state))) {
-        ttywrite(customkey, strlen(customkey), 1);
+        die_on_ttywrite(customkey, strlen(customkey));
         return;
     }
 
@@ -1814,7 +1814,7 @@ kpress(XEvent *ev)
             len = 2;
         }
     }
-    ttywrite(buf, len, 1);
+    die_on_ttywrite(buf, len);
 }
 
 void

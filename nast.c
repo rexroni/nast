@@ -133,6 +133,9 @@ typedef struct {
     size_t tlines_bot;
     size_t tlines_top;
 
+    // callback for writing to TTY (for obscure control codes)
+    void (*ttywrite)(const char *, size_t);
+
     Line *line;   /* screen */
     Line *alt;    /* alternate screen */
     int *dirty;   /* dirtyness of lines */
@@ -174,7 +177,7 @@ typedef struct {
 static void execsh(char *, char **);
 static void stty(char **);
 static void sigchld(int);
-static void ttywriteraw(const char *, size_t);
+// static void ttywriteraw(const char *, size_t);
 
 static void csidump(void);
 static void csihandle(void);
@@ -863,90 +866,6 @@ ttyread(void)
     return ret;
 }
 
-void
-ttywrite(const char *s, size_t n, int may_echo)
-{
-    const char *next;
-
-    if (may_echo && IS_SET(MODE_ECHO))
-        twrite(s, n, 1);
-
-    if (!IS_SET(MODE_CRLF)) {
-        ttywriteraw(s, n);
-        return;
-    }
-
-    /* This is similar to how the kernel handles ONLCR for ttys */
-    while (n > 0) {
-        if (*s == '\r') {
-            next = s + 1;
-            ttywriteraw("\r\n", 2);
-        } else {
-            next = memchr(s, '\r', n);
-            DEFAULT(next, s + n);
-            ttywriteraw(s, next - s);
-        }
-        n -= next - s;
-        s = next;
-    }
-}
-
-void
-ttywriteraw(const char *s, size_t n)
-{
-    fd_set wfd, rfd;
-    ssize_t r;
-    size_t lim = 256;
-
-    /*
-     * Remember that we are using a pty, which might be a modem line.
-     * Writing too much will clog the line. That's why we are doing this
-     * dance.
-     * FIXME: Migrate the world to Plan 9.
-     */
-    while (n > 0) {
-        FD_ZERO(&wfd);
-        FD_ZERO(&rfd);
-        FD_SET(cmdfd, &wfd);
-        FD_SET(cmdfd, &rfd);
-
-        /* Check if we can write. */
-        if (pselect(cmdfd+1, &rfd, &wfd, NULL, NULL, NULL) < 0) {
-            if (errno == EINTR)
-                continue;
-            die("select failed: %s\n", strerror(errno));
-        }
-        if (FD_ISSET(cmdfd, &wfd)) {
-            /*
-             * Only write the bytes written by ttywrite() or the
-             * default of 256. This seems to be a reasonable value
-             * for a serial line. Bigger values might clog the I/O.
-             */
-            if ((r = write(cmdfd, s, (n < lim)? n : lim)) < 0)
-                goto write_error;
-            if (r < n) {
-                /*
-                 * We weren't able to write out everything.
-                 * This means the buffer is getting full
-                 * again. Empty it.
-                 */
-                if (n < lim)
-                    lim = ttyread();
-                n -= r;
-                s += r;
-            } else {
-                /* All bytes have been written. */
-                break;
-            }
-        }
-        if (FD_ISSET(cmdfd, &rfd))
-            lim = ttyread();
-    }
-    return;
-
-write_error:
-    die("write error on tty: %s\n", strerror(errno));
-}
 
 void
 ttyresize(int tw, int th)
@@ -1136,10 +1055,14 @@ fail:
     return -1;
 }
 
-void
-tnew(int col, int row, char *font_name)
+void tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size_t))
 {
-    term = (Term){ .c = { .attr = { .fg = defaultfg, .bg = defaultbg } } };
+    term = (Term){
+        .c = {
+            .attr = { .fg = defaultfg, .bg = defaultbg }
+        },
+        .ttywrite = ttywrite,
+    };
 
     int ret = tfont(font_name, &term.desc, &term.grid_w, &term.grid_h);
     if(ret < 0){
@@ -1775,7 +1698,7 @@ csihandle(void)
         break;
     case 'c': /* DA -- Device Attributes */
         if (csiescseq.arg[0] == 0)
-            ttywrite(vtiden, strlen(vtiden), 0);
+            term.ttywrite(vtiden, strlen(vtiden));
         break;
     case 'C': /* CUF -- Cursor <n> Forward */
     case 'a': /* HPR -- Cursor <n> Forward */
@@ -1902,7 +1825,7 @@ csihandle(void)
         if (csiescseq.arg[0] == 6) {
             len = snprintf(buf, sizeof(buf),"\033[%i;%iR",
                     term.c.y+1, term.c.x+1);
-            ttywrite(buf, len, 0);
+            term.ttywrite(buf, len);
         }
         break;
     case 'r': /* DECSTBM -- Set Scrolling Region */
@@ -2315,7 +2238,7 @@ tcontrolcode(uchar ascii)
     case 0x99:   /* TODO: SGCI */
         break;
     case 0x9a:   /* DECID -- Identify Terminal */
-        ttywrite(vtiden, strlen(vtiden), 0);
+        term.ttywrite(vtiden, strlen(vtiden));
         break;
     case 0x9b:   /* TODO: CSI */
     case 0x9c:   /* TODO: ST */
@@ -2387,7 +2310,7 @@ eschandle(uchar ascii)
         }
         break;
     case 'Z': /* DECID -- Identify Terminal */
-        ttywrite(vtiden, strlen(vtiden), 0);
+        term.ttywrite(vtiden, strlen(vtiden));
         break;
     case 'c': /* RIS -- Reset to initial state */
         treset();
