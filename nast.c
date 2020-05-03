@@ -129,9 +129,9 @@ typedef struct {
 
     TLine **tlines;
     // ring buffer semantics
-    size_t tlines_cap;
-    size_t tlines_bot;
-    size_t tlines_top;
+    size_t tlines_cap;   // cap = length of
+    size_t tlines_start; // the oldest line in memory
+    size_t tlines_end;   // non-inclusive endpoint
 
     // callback for writing to TTY (for obscure control codes)
     void (*ttywrite)(const char *, size_t);
@@ -249,15 +249,19 @@ static int cmdfd;
 static pid_t pid;
 
 // get the physical index from an offset (a logical index)
-static inline size_t tlines_idx(size_t offset){
-    return (term.tlines_bot + offset) % term.tlines_cap;
+static inline size_t tlines_idx(size_t idx){
+    return (term.tlines_start + idx) % (term.tlines_cap + 1);
+}
+
+static inline TLine *get_tline(size_t idx){
+    return term.tlines[tlines_idx(idx)];
 }
 
 static inline size_t tlines_len(void){
-    if(term.tlines_top >= term.tlines_bot){
-        return term.tlines_top - term.tlines_bot + 1;
+    if(term.tlines_end >= term.tlines_start){
+        return term.tlines_end - term.tlines_start;
     }else{
-        return term.tlines_top + term.tlines_cap - term.tlines_bot + 1;
+        return term.tlines_end + (term.tlines_cap + 1) - term.tlines_start;
     }
 }
 
@@ -1070,14 +1074,14 @@ void tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size
     }
 
     // allocate history
-    term.tlines_cap = 10000;
-    size_t nbytes = term.tlines_cap * sizeof(*term.tlines);
+    term.tlines_cap = 10000 - 1;
+    size_t nbytes = (term.tlines_cap + 1) * sizeof(*term.tlines);
     term.tlines = xmalloc(nbytes);
     // all lines start empty
     memset(term.tlines, 0, nbytes);
 
     // start with the first line allocated
-    term.tlines[term.tlines_bot] = tline_new();
+    term.tlines[term.tlines_end++] = tline_new();
 
     tresize(col, row);
     treset();
@@ -1168,21 +1172,44 @@ selscroll(int orig, int n)
 void
 tnewline(int first_col)
 {
+    // TODO: what happens if the cursor is not at the bottom of the buffer?
+
     // is ring buffer full?
     if(tlines_len() == term.tlines_cap){
         // free oldest tline
         tline_free(&term.tlines[term.top]);
-        // forget the oldest history element
-        term.tlines_top = tlines_idx(term.tlines_cap - 1);
+        // forget the oldest history element (start of the ring buffer)
+        term.tlines_start = tlines_idx(term.tlines_start + 1);
+        // cursor position is relative to start of ring buffer, which changed
+        term.c.y--;
     }
 
-    // always shift the bottom index, the top can stay
-    term.tlines_bot = tlines_idx(term.tlines_cap - 1);
+    // extend the buffer
+    term.tlines[term.tlines_end] = tline_new();
+    term.tlines_end = tlines_idx(term.tlines_end + 1);
 
-    // create a new empty line
-    term.tlines[term.tlines_bot] = tline_new();
+    // move the cursor down a line
+    term.c.y++;
 
-    tmoveto(first_col ? 0 : term.c.x, term.c.y);
+    if(first_col){
+        tmoveto(0, term.c.y);
+    }else{
+        // don't insert entire blank lines of spaces
+        term.c.x = term.c.x % term.col;
+        for(size_t i = 0; i < term.c.x; i++){
+            // insert spaces before the character
+            Glyph g = {
+                .u = ' ',
+                .mode = term.mode,
+                .fg = term.c.attr.fg,
+                .bg = term.c.attr.bg,
+            };
+            tline_insert_glyph(get_tline(term.c.y), i, g);
+        }
+        tmoveto(term.c.x, term.c.y);
+    }
+
+    //tmoveto(first_col ? 0 : term.c.x, term.c.y);
 }
 
 void
@@ -2462,7 +2489,7 @@ check_control_code:
     Glyph g = term.c.attr;
     g.u = u;
 
-    TLine *tline = term.tlines[tlines_idx(term.c.y)];
+    TLine *tline = get_tline(term.c.y);
     if(term.c.x == tline->n_glyphs || IS_SET(MODE_INSERT)){
         //printf("tline_insert_glyph(%d, %c)\n", term.c.x, (char)g.u);
         // we are at the end of the line or in insert mode
@@ -2681,12 +2708,12 @@ RLine *rline_new(const Glyph *glyphs, size_t n_glyphs){
 
 // render
 double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,
-        double x, size_t start, size_t len){
+        double x, size_t start, size_t end){
     // expand glyphs back into utf8 for pango
     // TODO: support arbitrary-length lines
     char utf8[4096];
     size_t utf8_len = 0;
-    for(size_t i = 0; i < rline->n_glyphs; i++){
+    for(size_t i = start; i < end; i++){
         utf8_len += utf8encode(rline->glyphs[i].u, &utf8[utf8_len]);
     }
 
@@ -2731,12 +2758,14 @@ void rline_render(RLine *rline){
     for(i = 1; i < rline->n_glyphs; i++){
         if(!format_eq(cur_fmt, rline->glyphs[i])){
             // found a different format, i-1 was the end of the render box
-            x = rline_subrender(rline, cr, layout, x, start, i - start);
+            x = rline_subrender(rline, cr, layout, x, start, i);
             start = i;
+            // i is the beginning of the next format
+            cur_fmt = rline->glyphs[i];
         }
     }
     // render the final chunk
-    rline_subrender(rline, cr, layout, x, start, i - start);
+    rline_subrender(rline, cr, layout, x, start, rline->n_glyphs);
     g_object_unref(layout);
     cairo_destroy(cr);
 }
@@ -2875,7 +2904,7 @@ size_t tline_draw(TLine *tline, cairo_t *cr, size_t lines_left){
 // delete any rendered artifacts but leave the text alone
 void tunrender(void){
     for(size_t i = 0; i < tlines_len(); i++){
-        tline_unrender(term.tlines[tlines_idx(i)]);
+        tline_unrender(get_tline(i));
     }
 }
 
@@ -2893,7 +2922,7 @@ void trender(cairo_t *cr, double w, double h){
     size_t lines_to_render = term.row;
     for(size_t i = 0; i < tlines_len() && lines_to_render > 0; i++){
         // get the line at this index
-        TLine *tline = term.tlines[tlines_idx(i)];
+        TLine *tline = get_tline(tlines_len() - i - 1);
         // render this line
         lines_to_render = tline_render(tline, term.render_w, lines_to_render);
     }
@@ -2902,7 +2931,7 @@ void trender(cairo_t *cr, double w, double h){
     lines_to_render = term.row - lines_to_render;
     for(size_t i = 0; i < tlines_len() && lines_to_render > 0; i++){
         // get the line at this index
-        TLine *tline = term.tlines[tlines_idx(i)];
+        TLine *tline = get_tline(tlines_len() - i - 1);
         // draw this line
         lines_to_render = tline_draw(tline, cr, lines_to_render);
     }

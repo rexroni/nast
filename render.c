@@ -140,8 +140,18 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 
     if(event_key->type == GDK_KEY_PRESS){
         switch(event_key->keyval){
-            case GDK_KEY_BackSpace: printf("bs\n"); ttywrite(g, "\b", 1, 0); break;
-            case GDK_KEY_Return: printf("return\n"); ttywrite(g, "\n", 1, 0); break;
+            case GDK_KEY_BackSpace:
+                // printf("bs\n");
+                ttywrite(g, "\b", 1, 0);
+                // twrite("\b", 1, 0);
+                gtk_widget_queue_draw(g->darea);
+                break;
+            case GDK_KEY_Return:
+                // printf("return\n");
+                ttywrite(g, "\n", 1, 0);
+                // twrite("\n", 1, 0);
+                gtk_widget_queue_draw(g->darea);
+                break;
             default: printf("unhandled key! (%c)\n", event_key->keyval); return FALSE;
         }
     }
@@ -151,7 +161,9 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
     // printf("commit! (%s)\n", str);
     globals_t *g = user_data;
-    ttywrite(g, str, strlen(str), 0);
+    // ttywrite(g, str, strlen(str), 0);
+    twrite(str, strlen(str), 0);
+    gtk_widget_queue_draw(g->darea);
 }
 
 static void im_preedit_start(GtkIMContext *im_ctx, gpointer user_data){
@@ -180,7 +192,7 @@ static gboolean tty_read(GIOChannel *src, globals_t *g){
     // printf("read: %s\n", buf);
     for(size_t i = 0; i < sizeof(buf) / sizeof(*buf); i++){
         if(buf[i] < 128 && buf[i] > 31) continue;
-        // if(buf[i] == '\n') continue;
+        if(buf[i] == '\n') continue;
         buf[i] = 'X';
     }
     twrite(buf, bytes_read, 0);
@@ -341,6 +353,11 @@ int main(int argc, char *argv[]){
     GIOCondition cond = G_IO_IN | G_IO_PRI | G_IO_ERR | G_IO_HUP | G_IO_NVAL;
     guint rd_event_src_id = g_io_add_watch(ttychan, cond, tty_io, &g);
     (void)rd_event_src_id;
+
+
+    // write some shit
+    char buf[] = "hello\nworld\nthis\nis\na\ntest\r\n";
+    twrite(buf, sizeof(buf) - 1,  0);
 
     gtk_main();
 
