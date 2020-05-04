@@ -356,7 +356,7 @@ int main(int argc, char *argv[]){
 
 
     // write some shit
-    char buf[] = "hello\nworld\nthis\nis\na\ntest\r\n";
+    char buf[] = "hello \x1b[35mworld\x1b[m!\r\nthis\r\nis\r\na\r\ntest\r\n";
     twrite(buf, sizeof(buf) - 1,  0);
 
     gtk_main();

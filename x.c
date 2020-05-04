@@ -805,9 +805,10 @@ xsetcolorname(int x, const char *name)
 void
 xclear(int x1, int y1, int x2, int y2)
 {
-    XftDrawRect(xw.draw,
-            &dc.col[IS_SET(MODE_REVERSE)? defaultfg : defaultbg],
-            x1, y1, x2-x1, y2-y1);
+    die("xclear not implemented\n");
+//     XftDrawRect(xw.draw,
+//             &dc.col[IS_SET(MODE_REVERSE)? defaultfg : defaultbg],
+//             x1, y1, x2-x1, y2-y1);
 }
 
 void
@@ -1083,113 +1084,114 @@ xicdestroy(XIC xim, XPointer client, XPointer call)
 void
 xinit(int cols, int rows)
 {
-    XGCValues gcvalues;
-    Cursor cursor;
-    Window parent;
-    pid_t thispid = getpid();
-    XColor xmousefg, xmousebg;
-
-    if (!(xw.dpy = XOpenDisplay(NULL)))
-        die("can't open display\n");
-    xw.scr = XDefaultScreen(xw.dpy);
-    xw.vis = XDefaultVisual(xw.dpy, xw.scr);
-
-    /* font */
-    if (!FcInit())
-        die("could not init fontconfig.\n");
-
-    usedfont = (opt_font == NULL)? font : opt_font;
-    xloadfonts(usedfont, 0);
-
-    /* colors */
-    xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
-    xloadcols();
-
-    /* adjust fixed window geometry */
-    win.w = 2 * borderpx + cols * win.cw;
-    win.h = 2 * borderpx + rows * win.ch;
-    if (xw.gm & XNegative)
-        xw.l += DisplayWidth(xw.dpy, xw.scr) - win.w - 2;
-    if (xw.gm & YNegative)
-        xw.t += DisplayHeight(xw.dpy, xw.scr) - win.h - 2;
-
-    /* Events */
-    xw.attrs.background_pixel = dc.col[defaultbg].pixel;
-    xw.attrs.border_pixel = dc.col[defaultbg].pixel;
-    xw.attrs.bit_gravity = NorthWestGravity;
-    xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
-        | ExposureMask | VisibilityChangeMask | StructureNotifyMask
-        | ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
-    xw.attrs.colormap = xw.cmap;
-
-    if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0))))
-        parent = XRootWindow(xw.dpy, xw.scr);
-    xw.win = XCreateWindow(xw.dpy, parent, xw.l, xw.t,
-            win.w, win.h, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
-            xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
-            | CWEventMask | CWColormap, &xw.attrs);
-
-    memset(&gcvalues, 0, sizeof(gcvalues));
-    gcvalues.graphics_exposures = False;
-    dc.gc = XCreateGC(xw.dpy, parent, GCGraphicsExposures,
-            &gcvalues);
-    xw.buf = XCreatePixmap(xw.dpy, xw.win, win.w, win.h,
-            DefaultDepth(xw.dpy, xw.scr));
-    XSetForeground(xw.dpy, dc.gc, dc.col[defaultbg].pixel);
-    XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, win.w, win.h);
-
-    /* font spec buffer */
-    xw.specbuf = xmalloc(cols * sizeof(GlyphFontSpec));
-
-    /* Xft rendering context */
-    xw.draw = XftDrawCreate(xw.dpy, xw.buf, xw.vis, xw.cmap);
-
-    /* input methods */
-    if (!ximopen(xw.dpy)) {
-        XRegisterIMInstantiateCallback(xw.dpy, NULL, NULL, NULL,
-                                           ximinstantiate, NULL);
-    }
-
-    /* white cursor, black outline */
-    cursor = XCreateFontCursor(xw.dpy, mouseshape);
-    XDefineCursor(xw.dpy, xw.win, cursor);
-
-    if (XParseColor(xw.dpy, xw.cmap, colorname[mousefg], &xmousefg) == 0) {
-        xmousefg.red   = 0xffff;
-        xmousefg.green = 0xffff;
-        xmousefg.blue  = 0xffff;
-    }
-
-    if (XParseColor(xw.dpy, xw.cmap, colorname[mousebg], &xmousebg) == 0) {
-        xmousebg.red   = 0x0000;
-        xmousebg.green = 0x0000;
-        xmousebg.blue  = 0x0000;
-    }
-
-    XRecolorCursor(xw.dpy, cursor, &xmousefg, &xmousebg);
-
-    xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
-    xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
-    xw.netwmname = XInternAtom(xw.dpy, "_NET_WM_NAME", False);
-    XSetWMProtocols(xw.dpy, xw.win, &xw.wmdeletewin, 1);
-
-    xw.netwmpid = XInternAtom(xw.dpy, "_NET_WM_PID", False);
-    XChangeProperty(xw.dpy, xw.win, xw.netwmpid, XA_CARDINAL, 32,
-            PropModeReplace, (uchar *)&thispid, 1);
-
-    win.mode = MODE_NUMLOCK;
-    resettitle();
-    xhints();
-    XMapWindow(xw.dpy, xw.win);
-    XSync(xw.dpy, False);
-
-    clock_gettime(CLOCK_MONOTONIC, &xsel.tclick1);
-    clock_gettime(CLOCK_MONOTONIC, &xsel.tclick2);
-    xsel.primary = NULL;
-    xsel.clipboard = NULL;
-    xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
-    if (xsel.xtarget == None)
-        xsel.xtarget = XA_STRING;
+    die("xinit not implemented\n");
+//     XGCValues gcvalues;
+//     Cursor cursor;
+//     Window parent;
+//     pid_t thispid = getpid();
+//     XColor xmousefg, xmousebg;
+//
+//     if (!(xw.dpy = XOpenDisplay(NULL)))
+//         die("can't open display\n");
+//     xw.scr = XDefaultScreen(xw.dpy);
+//     xw.vis = XDefaultVisual(xw.dpy, xw.scr);
+//
+//     /* font */
+//     if (!FcInit())
+//         die("could not init fontconfig.\n");
+//
+//     usedfont = (opt_font == NULL)? font : opt_font;
+//     xloadfonts(usedfont, 0);
+//
+//     /* colors */
+//     xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
+//     xloadcols();
+//
+//     /* adjust fixed window geometry */
+//     win.w = 2 * borderpx + cols * win.cw;
+//     win.h = 2 * borderpx + rows * win.ch;
+//     if (xw.gm & XNegative)
+//         xw.l += DisplayWidth(xw.dpy, xw.scr) - win.w - 2;
+//     if (xw.gm & YNegative)
+//         xw.t += DisplayHeight(xw.dpy, xw.scr) - win.h - 2;
+//
+//     /* Events */
+//     xw.attrs.background_pixel = dc.col[defaultbg].pixel;
+//     xw.attrs.border_pixel = dc.col[defaultbg].pixel;
+//     xw.attrs.bit_gravity = NorthWestGravity;
+//     xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
+//         | ExposureMask | VisibilityChangeMask | StructureNotifyMask
+//         | ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
+//     xw.attrs.colormap = xw.cmap;
+//
+//     if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0))))
+//         parent = XRootWindow(xw.dpy, xw.scr);
+//     xw.win = XCreateWindow(xw.dpy, parent, xw.l, xw.t,
+//             win.w, win.h, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
+//             xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
+//             | CWEventMask | CWColormap, &xw.attrs);
+//
+//     memset(&gcvalues, 0, sizeof(gcvalues));
+//     gcvalues.graphics_exposures = False;
+//     dc.gc = XCreateGC(xw.dpy, parent, GCGraphicsExposures,
+//             &gcvalues);
+//     xw.buf = XCreatePixmap(xw.dpy, xw.win, win.w, win.h,
+//             DefaultDepth(xw.dpy, xw.scr));
+//     XSetForeground(xw.dpy, dc.gc, dc.col[defaultbg].pixel);
+//     XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, win.w, win.h);
+//
+//     /* font spec buffer */
+//     xw.specbuf = xmalloc(cols * sizeof(GlyphFontSpec));
+//
+//     /* Xft rendering context */
+//     xw.draw = XftDrawCreate(xw.dpy, xw.buf, xw.vis, xw.cmap);
+//
+//     /* input methods */
+//     if (!ximopen(xw.dpy)) {
+//         XRegisterIMInstantiateCallback(xw.dpy, NULL, NULL, NULL,
+//                                            ximinstantiate, NULL);
+//     }
+//
+//     /* white cursor, black outline */
+//     cursor = XCreateFontCursor(xw.dpy, mouseshape);
+//     XDefineCursor(xw.dpy, xw.win, cursor);
+//
+//     if (XParseColor(xw.dpy, xw.cmap, colorname[mousefg], &xmousefg) == 0) {
+//         xmousefg.red   = 0xffff;
+//         xmousefg.green = 0xffff;
+//         xmousefg.blue  = 0xffff;
+//     }
+//
+//     if (XParseColor(xw.dpy, xw.cmap, colorname[mousebg], &xmousebg) == 0) {
+//         xmousebg.red   = 0x0000;
+//         xmousebg.green = 0x0000;
+//         xmousebg.blue  = 0x0000;
+//     }
+//
+//     XRecolorCursor(xw.dpy, cursor, &xmousefg, &xmousebg);
+//
+//     xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
+//     xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
+//     xw.netwmname = XInternAtom(xw.dpy, "_NET_WM_NAME", False);
+//     XSetWMProtocols(xw.dpy, xw.win, &xw.wmdeletewin, 1);
+//
+//     xw.netwmpid = XInternAtom(xw.dpy, "_NET_WM_PID", False);
+//     XChangeProperty(xw.dpy, xw.win, xw.netwmpid, XA_CARDINAL, 32,
+//             PropModeReplace, (uchar *)&thispid, 1);
+//
+//     win.mode = MODE_NUMLOCK;
+//     resettitle();
+//     xhints();
+//     XMapWindow(xw.dpy, xw.win);
+//     XSync(xw.dpy, False);
+//
+//     clock_gettime(CLOCK_MONOTONIC, &xsel.tclick1);
+//     clock_gettime(CLOCK_MONOTONIC, &xsel.tclick2);
+//     xsel.primary = NULL;
+//     xsel.clipboard = NULL;
+//     xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
+//     if (xsel.xtarget == None)
+//         xsel.xtarget = XA_STRING;
 }
 
 int
@@ -1327,136 +1329,137 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 void
 xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, int y)
 {
-    int charlen = len * ((base.mode & ATTR_WIDE) ? 2 : 1);
-    int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch,
-        width = charlen * win.cw;
-    Color *fg, *bg, *temp, revfg, revbg, truefg, truebg;
-    XRenderColor colfg, colbg;
-    XRectangle r;
-
-    /* Fallback on color display for attributes not supported by the font */
-    if (base.mode & ATTR_ITALIC && base.mode & ATTR_BOLD) {
-        if (dc.ibfont.badslant || dc.ibfont.badweight)
-            base.fg = defaultattr;
-    } else if ((base.mode & ATTR_ITALIC && dc.ifont.badslant) ||
-        (base.mode & ATTR_BOLD && dc.bfont.badweight)) {
-        base.fg = defaultattr;
-    }
-
-    if (IS_TRUECOL(base.fg)) {
-        colfg.alpha = 0xffff;
-        colfg.red = TRUERED(base.fg);
-        colfg.green = TRUEGREEN(base.fg);
-        colfg.blue = TRUEBLUE(base.fg);
-        XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &truefg);
-        fg = &truefg;
-    } else {
-        fg = &dc.col[base.fg];
-    }
-
-    if (IS_TRUECOL(base.bg)) {
-        colbg.alpha = 0xffff;
-        colbg.green = TRUEGREEN(base.bg);
-        colbg.red = TRUERED(base.bg);
-        colbg.blue = TRUEBLUE(base.bg);
-        XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colbg, &truebg);
-        bg = &truebg;
-    } else {
-        bg = &dc.col[base.bg];
-    }
-
-    /* Change basic system colors [0-7] to bright system colors [8-15] */
-    if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
-        fg = &dc.col[base.fg + 8];
-
-    if (IS_SET(MODE_REVERSE)) {
-        if (fg == &dc.col[defaultfg]) {
-            fg = &dc.col[defaultbg];
-        } else {
-            colfg.red = ~fg->color.red;
-            colfg.green = ~fg->color.green;
-            colfg.blue = ~fg->color.blue;
-            colfg.alpha = fg->color.alpha;
-            XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg,
-                    &revfg);
-            fg = &revfg;
-        }
-
-        if (bg == &dc.col[defaultbg]) {
-            bg = &dc.col[defaultfg];
-        } else {
-            colbg.red = ~bg->color.red;
-            colbg.green = ~bg->color.green;
-            colbg.blue = ~bg->color.blue;
-            colbg.alpha = bg->color.alpha;
-            XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colbg,
-                    &revbg);
-            bg = &revbg;
-        }
-    }
-
-    if ((base.mode & ATTR_BOLD_FAINT) == ATTR_FAINT) {
-        colfg.red = fg->color.red / 2;
-        colfg.green = fg->color.green / 2;
-        colfg.blue = fg->color.blue / 2;
-        colfg.alpha = fg->color.alpha;
-        XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &revfg);
-        fg = &revfg;
-    }
-
-    if (base.mode & ATTR_REVERSE) {
-        temp = fg;
-        fg = bg;
-        bg = temp;
-    }
-
-    if (base.mode & ATTR_BLINK && win.mode & MODE_BLINK)
-        fg = bg;
-
-    if (base.mode & ATTR_INVISIBLE)
-        fg = bg;
-
-    /* Intelligent cleaning up of the borders. */
-    if (x == 0) {
-        xclear(0, (y == 0)? 0 : winy, borderpx,
-            winy + win.ch +
-            ((winy + win.ch >= borderpx + win.th)? win.h : 0));
-    }
-    if (winx + width >= borderpx + win.tw) {
-        xclear(winx + width, (y == 0)? 0 : winy, win.w,
-            ((winy + win.ch >= borderpx + win.th)? win.h : (winy + win.ch)));
-    }
-    if (y == 0)
-        xclear(winx, 0, winx + width, borderpx);
-    if (winy + win.ch >= borderpx + win.th)
-        xclear(winx, winy + win.ch, winx + width, win.h);
-
-    /* Clean up the region we want to draw to. */
-    XftDrawRect(xw.draw, bg, winx, winy, width, win.ch);
-
-    /* Set the clip region because Xft is sometimes dirty. */
-    r.x = 0;
-    r.y = 0;
-    r.height = win.ch;
-    r.width = width;
-    XftDrawSetClipRectangles(xw.draw, winx, winy, &r, 1);
-
-    /* Render the glyphs. */
-    XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
-
-    /* Render underline and strikethrough. */
-    if (base.mode & ATTR_UNDERLINE) {
-        XftDrawRect(xw.draw, fg, winx, winy + dc.font.ascent + 1,
-                width, 1);
-    }
-
-    if (base.mode & ATTR_STRUCK) {
-        XftDrawRect(xw.draw, fg, winx, winy + 2 * dc.font.ascent / 3,
-                width, 1);
-    }
-
-    /* Reset clip to none. */
-    XftDrawSetClip(xw.draw, 0);
+    die("xdrawglyphfontspecs not implemented\n");
+//     int charlen = len * ((base.mode & ATTR_WIDE) ? 2 : 1);
+//     int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch,
+//         width = charlen * win.cw;
+//     Color *fg, *bg, *temp, revfg, revbg, truefg, truebg;
+//     XRenderColor colfg, colbg;
+//     XRectangle r;
+//
+//     /* Fallback on color display for attributes not supported by the font */
+//     if (base.mode & ATTR_ITALIC && base.mode & ATTR_BOLD) {
+//         if (dc.ibfont.badslant || dc.ibfont.badweight)
+//             base.fg = defaultattr;
+//     } else if ((base.mode & ATTR_ITALIC && dc.ifont.badslant) ||
+//         (base.mode & ATTR_BOLD && dc.bfont.badweight)) {
+//         base.fg = defaultattr;
+//     }
+//
+//     if (IS_TRUECOL(base.fg)) {
+//         colfg.alpha = 0xffff;
+//         colfg.red = TRUERED(base.fg);
+//         colfg.green = TRUEGREEN(base.fg);
+//         colfg.blue = TRUEBLUE(base.fg);
+//         XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &truefg);
+//         fg = &truefg;
+//     } else {
+//         fg = &dc.col[base.fg];
+//     }
+//
+//     if (IS_TRUECOL(base.bg)) {
+//         colbg.alpha = 0xffff;
+//         colbg.green = TRUEGREEN(base.bg);
+//         colbg.red = TRUERED(base.bg);
+//         colbg.blue = TRUEBLUE(base.bg);
+//         XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colbg, &truebg);
+//         bg = &truebg;
+//     } else {
+//         bg = &dc.col[base.bg];
+//     }
+//
+//     /* Change basic system colors [0-7] to bright system colors [8-15] */
+//     if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
+//         fg = &dc.col[base.fg + 8];
+//
+//     if (IS_SET(MODE_REVERSE)) {
+//         if (fg == &dc.col[defaultfg]) {
+//             fg = &dc.col[defaultbg];
+//         } else {
+//             colfg.red = ~fg->color.red;
+//             colfg.green = ~fg->color.green;
+//             colfg.blue = ~fg->color.blue;
+//             colfg.alpha = fg->color.alpha;
+//             XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg,
+//                     &revfg);
+//             fg = &revfg;
+//         }
+//
+//         if (bg == &dc.col[defaultbg]) {
+//             bg = &dc.col[defaultfg];
+//         } else {
+//             colbg.red = ~bg->color.red;
+//             colbg.green = ~bg->color.green;
+//             colbg.blue = ~bg->color.blue;
+//             colbg.alpha = bg->color.alpha;
+//             XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colbg,
+//                     &revbg);
+//             bg = &revbg;
+//         }
+//     }
+//
+//     if ((base.mode & ATTR_BOLD_FAINT) == ATTR_FAINT) {
+//         colfg.red = fg->color.red / 2;
+//         colfg.green = fg->color.green / 2;
+//         colfg.blue = fg->color.blue / 2;
+//         colfg.alpha = fg->color.alpha;
+//         XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &revfg);
+//         fg = &revfg;
+//     }
+//
+//     if (base.mode & ATTR_REVERSE) {
+//         temp = fg;
+//         fg = bg;
+//         bg = temp;
+//     }
+//
+//     if (base.mode & ATTR_BLINK && win.mode & MODE_BLINK)
+//         fg = bg;
+//
+//     if (base.mode & ATTR_INVISIBLE)
+//         fg = bg;
+//
+//     /* Intelligent cleaning up of the borders. */
+//     if (x == 0) {
+//         xclear(0, (y == 0)? 0 : winy, borderpx,
+//             winy + win.ch +
+//             ((winy + win.ch >= borderpx + win.th)? win.h : 0));
+//     }
+//     if (winx + width >= borderpx + win.tw) {
+//         xclear(winx + width, (y == 0)? 0 : winy, win.w,
+//             ((winy + win.ch >= borderpx + win.th)? win.h : (winy + win.ch)));
+//     }
+//     if (y == 0)
+//         xclear(winx, 0, winx + width, borderpx);
+//     if (winy + win.ch >= borderpx + win.th)
+//         xclear(winx, winy + win.ch, winx + width, win.h);
+//
+//     /* Clean up the region we want to draw to. */
+//     XftDrawRect(xw.draw, bg, winx, winy, width, win.ch);
+//
+//     /* Set the clip region because Xft is sometimes dirty. */
+//     r.x = 0;
+//     r.y = 0;
+//     r.height = win.ch;
+//     r.width = width;
+//     XftDrawSetClipRectangles(xw.draw, winx, winy, &r, 1);
+//
+//     /* Render the glyphs. */
+//     XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
+//
+//     /* Render underline and strikethrough. */
+//     if (base.mode & ATTR_UNDERLINE) {
+//         XftDrawRect(xw.draw, fg, winx, winy + dc.font.ascent + 1,
+//                 width, 1);
+//     }
+//
+//     if (base.mode & ATTR_STRUCK) {
+//         XftDrawRect(xw.draw, fg, winx, winy + 2 * dc.font.ascent / 3,
+//                 width, 1);
+//     }
+//
+//     /* Reset clip to none. */
+//     XftDrawSetClip(xw.draw, 0);
 }
 
 void
@@ -1472,86 +1475,87 @@ xdrawglyph(Glyph g, int x, int y)
 void
 xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 {
-    Color drawcol;
-
-    /* remove the old cursor */
-    if (selected(ox, oy))
-        og.mode ^= ATTR_REVERSE;
-    xdrawglyph(og, ox, oy);
-
-    if (IS_SET(MODE_HIDE))
-        return;
-
-    /*
-     * Select the right color for the right mode.
-     */
-    g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE;
-
-    if (IS_SET(MODE_REVERSE)) {
-        g.mode |= ATTR_REVERSE;
-        g.bg = defaultfg;
-        if (selected(cx, cy)) {
-            drawcol = dc.col[defaultcs];
-            g.fg = defaultrcs;
-        } else {
-            drawcol = dc.col[defaultrcs];
-            g.fg = defaultcs;
-        }
-    } else {
-        if (selected(cx, cy)) {
-            g.fg = defaultfg;
-            g.bg = defaultrcs;
-        } else {
-            g.fg = defaultbg;
-            g.bg = defaultcs;
-        }
-        drawcol = dc.col[g.bg];
-    }
-
-    /* draw the new one */
-    if (IS_SET(MODE_FOCUSED)) {
-        switch (win.cursor) {
-        case 7: /* st extension: snowman (U+2603) */
-            g.u = 0x2603;
-        case 0: /* Blinking Block */
-        case 1: /* Blinking Block (Default) */
-        case 2: /* Steady Block */
-            xdrawglyph(g, cx, cy);
-            break;
-        case 3: /* Blinking Underline */
-        case 4: /* Steady Underline */
-            XftDrawRect(xw.draw, &drawcol,
-                    borderpx + cx * win.cw,
-                    borderpx + (cy + 1) * win.ch - \
-                        cursorthickness,
-                    win.cw, cursorthickness);
-            break;
-        case 5: /* Blinking bar */
-        case 6: /* Steady bar */
-            XftDrawRect(xw.draw, &drawcol,
-                    borderpx + cx * win.cw,
-                    borderpx + cy * win.ch,
-                    cursorthickness, win.ch);
-            break;
-        }
-    } else {
-        XftDrawRect(xw.draw, &drawcol,
-                borderpx + cx * win.cw,
-                borderpx + cy * win.ch,
-                win.cw - 1, 1);
-        XftDrawRect(xw.draw, &drawcol,
-                borderpx + cx * win.cw,
-                borderpx + cy * win.ch,
-                1, win.ch - 1);
-        XftDrawRect(xw.draw, &drawcol,
-                borderpx + (cx + 1) * win.cw - 1,
-                borderpx + cy * win.ch,
-                1, win.ch - 1);
-        XftDrawRect(xw.draw, &drawcol,
-                borderpx + cx * win.cw,
-                borderpx + (cy + 1) * win.ch - 1,
-                win.cw, 1);
-    }
+    die("xdrawcursor not implemented\n");
+//     Color drawcol;
+//
+//     /* remove the old cursor */
+//     if (selected(ox, oy))
+//         og.mode ^= ATTR_REVERSE;
+//     xdrawglyph(og, ox, oy);
+//
+//     if (IS_SET(MODE_HIDE))
+//         return;
+//
+//     /*
+//      * Select the right color for the right mode.
+//      */
+//     g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE;
+//
+//     if (IS_SET(MODE_REVERSE)) {
+//         g.mode |= ATTR_REVERSE;
+//         g.bg = defaultfg;
+//         if (selected(cx, cy)) {
+//             drawcol = dc.col[defaultcs];
+//             g.fg = defaultrcs;
+//         } else {
+//             drawcol = dc.col[defaultrcs];
+//             g.fg = defaultcs;
+//         }
+//     } else {
+//         if (selected(cx, cy)) {
+//             g.fg = defaultfg;
+//             g.bg = defaultrcs;
+//         } else {
+//             g.fg = defaultbg;
+//             g.bg = defaultcs;
+//         }
+//         drawcol = dc.col[g.bg];
+//     }
+//
+//     /* draw the new one */
+//     if (IS_SET(MODE_FOCUSED)) {
+//         switch (win.cursor) {
+//         case 7: /* st extension: snowman (U+2603) */
+//             g.u = 0x2603;
+//         case 0: /* Blinking Block */
+//         case 1: /* Blinking Block (Default) */
+//         case 2: /* Steady Block */
+//             xdrawglyph(g, cx, cy);
+//             break;
+//         case 3: /* Blinking Underline */
+//         case 4: /* Steady Underline */
+//             XftDrawRect(xw.draw, &drawcol,
+//                     borderpx + cx * win.cw,
+//                     borderpx + (cy + 1) * win.ch - \
+//                         cursorthickness,
+//                     win.cw, cursorthickness);
+//             break;
+//         case 5: /* Blinking bar */
+//         case 6: /* Steady bar */
+//             XftDrawRect(xw.draw, &drawcol,
+//                     borderpx + cx * win.cw,
+//                     borderpx + cy * win.ch,
+//                     cursorthickness, win.ch);
+//             break;
+//         }
+//     } else {
+//         XftDrawRect(xw.draw, &drawcol,
+//                 borderpx + cx * win.cw,
+//                 borderpx + cy * win.ch,
+//                 win.cw - 1, 1);
+//         XftDrawRect(xw.draw, &drawcol,
+//                 borderpx + cx * win.cw,
+//                 borderpx + cy * win.ch,
+//                 1, win.ch - 1);
+//         XftDrawRect(xw.draw, &drawcol,
+//                 borderpx + (cx + 1) * win.cw - 1,
+//                 borderpx + cy * win.ch,
+//                 1, win.ch - 1);
+//         XftDrawRect(xw.draw, &drawcol,
+//                 borderpx + cx * win.cw,
+//                 borderpx + (cy + 1) * win.ch - 1,
+//                 win.cw, 1);
+//     }
 }
 
 void
@@ -1585,42 +1589,44 @@ xstartdraw(void)
 void
 xdrawline(Line line, int x1, int y1, int x2)
 {
-    int i, x, ox, numspecs;
-    Glyph base, new;
-    XftGlyphFontSpec *specs = xw.specbuf;
-
-    numspecs = xmakeglyphfontspecs(specs, &line[x1], x2 - x1, x1, y1);
-    i = ox = 0;
-    for (x = x1; x < x2 && i < numspecs; x++) {
-        new = line[x];
-        if (new.mode == ATTR_WDUMMY)
-            continue;
-        if (selected(x, y1))
-            new.mode ^= ATTR_REVERSE;
-        if (i > 0 && ATTRCMP(base, new)) {
-            xdrawglyphfontspecs(specs, base, i, ox, y1);
-            specs += i;
-            numspecs -= i;
-            i = 0;
-        }
-        if (i == 0) {
-            ox = x;
-            base = new;
-        }
-        i++;
-    }
-    if (i > 0)
-        xdrawglyphfontspecs(specs, base, i, ox, y1);
+    die("xdrawline not implemented\n");
+//     int i, x, ox, numspecs;
+//     Glyph base, new;
+//     XftGlyphFontSpec *specs = xw.specbuf;
+//
+//     numspecs = xmakeglyphfontspecs(specs, &line[x1], x2 - x1, x1, y1);
+//     i = ox = 0;
+//     for (x = x1; x < x2 && i < numspecs; x++) {
+//         new = line[x];
+//         if (new.mode == ATTR_WDUMMY)
+//             continue;
+//         if (selected(x, y1))
+//             new.mode ^= ATTR_REVERSE;
+//         if (i > 0 && ATTRCMP(base, new)) {
+//             xdrawglyphfontspecs(specs, base, i, ox, y1);
+//             specs += i;
+//             numspecs -= i;
+//             i = 0;
+//         }
+//         if (i == 0) {
+//             ox = x;
+//             base = new;
+//         }
+//         i++;
+//     }
+//     if (i > 0)
+//         xdrawglyphfontspecs(specs, base, i, ox, y1);
 }
 
 void
 xfinishdraw(void)
 {
-    XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0, win.w,
-            win.h, 0, 0);
-    XSetForeground(xw.dpy, dc.gc,
-            dc.col[IS_SET(MODE_REVERSE)?
-                defaultfg : defaultbg].pixel);
+    die("xfinishdraw not implemented\n");
+//     XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0, win.w,
+//             win.h, 0, 0);
+//     XSetForeground(xw.dpy, dc.gc,
+//             dc.col[IS_SET(MODE_REVERSE)?
+//                 defaultfg : defaultbg].pixel);
 }
 
 void
@@ -1665,10 +1671,11 @@ xsetpointermotion(int set)
 void
 xsetmode(int set, unsigned int flags)
 {
-    int mode = win.mode;
-    MODBIT(win.mode, set, flags);
-    if ((win.mode & MODE_REVERSE) != (mode & MODE_REVERSE))
-        redraw();
+    die("xsetmode not implemented\n");
+//     int mode = win.mode;
+//     MODBIT(win.mode, set, flags);
+//     if ((win.mode & MODE_REVERSE) != (mode & MODE_REVERSE))
+//         redraw();
 }
 
 int

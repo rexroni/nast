@@ -24,9 +24,6 @@
                 (t1.tv_nsec-t2.tv_nsec)/1E6)
 #define MODBIT(x, set, bit)    ((set) ? ((x) |= (bit)) : ((x) &= ~(bit)))
 
-#define TRUECOLOR(r,g,b)    (1 << 24 | (r) << 16 | (g) << 8 | (b))
-#define IS_TRUECOL(x)        (1 << 24 & (x))
-
 enum glyph_attribute {
     ATTR_NULL       = 0,
     ATTR_BOLD       = 1 << 0,
@@ -59,6 +56,12 @@ enum selection_snap {
     SNAP_LINE = 2
 };
 
+struct rgb24 {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+};
+
 typedef unsigned char uchar;
 typedef unsigned int uint;
 typedef unsigned long ulong;
@@ -70,8 +73,8 @@ typedef uint_least32_t Rune;
 typedef struct {
     Rune u;           /* character code */
     ushort mode;      /* attribute flags */
-    uint32_t fg;      /* foreground  */
-    uint32_t bg;      /* background  */
+    struct rgb24 fg; /* foreground  */
+    struct rgb24 bg; /* background  */
 } Glyph;
 
 typedef Glyph* Line;
@@ -146,8 +149,11 @@ extern wchar_t *worddelimiters;
 extern int allowaltscreen;
 extern char *termname;
 extern unsigned int tabspaces;
-extern unsigned int defaultfg;
-extern unsigned int defaultbg;
+
+extern struct rgb24 defaultfg;
+extern struct rgb24 defaultbg;
+
+struct rgb24 rgb24_from_index(unsigned int index);
 
 //////
 

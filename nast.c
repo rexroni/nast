@@ -219,7 +219,7 @@ static void tfulldirt(void);
 static void tcontrolcode(uchar );
 static void tdectest(char );
 static void tdefutf8(char);
-static int32_t tdefcolor(int *, int *, int);
+static struct rgb24 tdefcolor(int *, int *, int, struct rgb24);
 static void tdeftran(char);
 static void tstrsequence(uchar);
 
@@ -1380,10 +1380,9 @@ tdeleteline(int n)
         tscrollup(term.c.y, n);
 }
 
-int32_t
-tdefcolor(int *attr, int *npar, int l)
+struct rgb24
+tdefcolor(int *attr, int *npar, int l, struct rgb24 fallback)
 {
-    int32_t idx = -1;
     uint r, g, b;
 
     switch (attr[*npar + 1]) {
@@ -1402,7 +1401,7 @@ tdefcolor(int *attr, int *npar, int l)
             fprintf(stderr, "erresc: bad rgb color (%u,%u,%u)\n",
                 r, g, b);
         else
-            idx = TRUECOLOR(r, g, b);
+            return (struct rgb24){r, g, b};
         break;
     case 5: /* indexed color */
         if (*npar + 2 >= l) {
@@ -1415,7 +1414,7 @@ tdefcolor(int *attr, int *npar, int l)
         if (!BETWEEN(attr[*npar], 0, 255))
             fprintf(stderr, "erresc: bad fgcolor %d\n", attr[*npar]);
         else
-            idx = attr[*npar];
+            return rgb24_from_index(attr[*npar]);
         break;
     case 0: /* implemented defined (only foreground) */
     case 1: /* transparent */
@@ -1427,14 +1426,13 @@ tdefcolor(int *attr, int *npar, int l)
         break;
     }
 
-    return idx;
+    return fallback;
 }
 
 void
 tsetattr(int *attr, int l)
 {
     int i;
-    int32_t idx;
 
     for (i = 0; i < l; i++) {
         switch (attr[i]) {
@@ -1499,28 +1497,26 @@ tsetattr(int *attr, int l)
             term.c.attr.mode &= ~ATTR_STRUCK;
             break;
         case 38:
-            if ((idx = tdefcolor(attr, &i, l)) >= 0)
-                term.c.attr.fg = idx;
+            term.c.attr.fg = tdefcolor(attr, &i, l, term.c.attr.fg);
             break;
         case 39:
             term.c.attr.fg = defaultfg;
             break;
         case 48:
-            if ((idx = tdefcolor(attr, &i, l)) >= 0)
-                term.c.attr.bg = idx;
+            term.c.attr.bg = tdefcolor(attr, &i, l, term.c.attr.bg);
             break;
         case 49:
             term.c.attr.bg = defaultbg;
             break;
         default:
             if (BETWEEN(attr[i], 30, 37)) {
-                term.c.attr.fg = attr[i] - 30;
+                term.c.attr.fg = rgb24_from_index(attr[i] - 30);
             } else if (BETWEEN(attr[i], 40, 47)) {
-                term.c.attr.bg = attr[i] - 40;
+                term.c.attr.bg = rgb24_from_index(attr[i] - 40);
             } else if (BETWEEN(attr[i], 90, 97)) {
-                term.c.attr.fg = attr[i] - 90 + 8;
+                term.c.attr.fg = rgb24_from_index(attr[i] - 90 + 8);
             } else if (BETWEEN(attr[i], 100, 107)) {
-                term.c.attr.bg = attr[i] - 100 + 8;
+                term.c.attr.bg = rgb24_from_index(attr[i] - 100 + 8);
             } else {
                 fprintf(stderr,
                     "erresc(default): gfx attr %d unknown\n",
@@ -2682,7 +2678,9 @@ void copy_rectangle(cairo_t *cr, cairo_surface_t *src, double x, double y,
 
 
 int format_eq(Glyph a, Glyph b){
-    return a.mode == b.mode && a.fg == b.fg && a.bg == b.bg;
+    return a.mode == b.mode
+        && a.fg.r == b.fg.r && a.fg.g == b.fg.g && a.fg.b == b.fg.b
+        && a.bg.r == b.bg.r && a.bg.g == b.bg.g && a.bg.b == b.bg.b;
 }
 
 void rline_free(RLine **rline){
@@ -2717,10 +2715,13 @@ double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,
         utf8_len += utf8encode(rline->glyphs[i].u, &utf8[utf8_len]);
     }
 
+    // get color from the first glyph
+    struct rgb24 rgb = rline->glyphs[start].fg;
+
     pango_layout_set_text(layout, utf8, utf8_len);
 
     cairo_move_to(cr, x, 0);
-    cairo_set_source_rgb(cr, 1, 0, 0);
+    cairo_set_source_rgb(cr, rgb.r / 255., rgb.g / 255., rgb.b / 255.);
 
     pango_cairo_show_layout(cr, layout);
 
@@ -2935,4 +2936,49 @@ void trender(cairo_t *cr, double w, double h){
         // draw this line
         lines_to_render = tline_draw(tline, cr, lines_to_render);
     }
+}
+
+// get the 24-bit color value from an ansi color index
+// such as with the CSI 38 ; 5 ; X m notation
+struct rgb24 rgb24_from_index(unsigned int index){
+    // 16 basic colors
+    struct rgb24 basic_colors[] = {
+        {0, 0, 0},        // 0
+        {205, 0, 0},      // 1
+        {0, 205, 0},      // 2
+        {205, 205, 0},    // 3
+        {0, 0, 238},      // 4
+        {205, 0, 205},    // 5
+        {0, 205, 205},    // 6
+        {229, 229, 229},  // 7
+        {127, 127, 127},  // 8
+        {255, 0, 0},      // 9
+        {0, 255, 0},      // 10
+        {255, 255, 0},    // 11
+        {92, 92, 255},    // 12
+        {255, 0, 255},    // 13
+        {0, 255, 255},    // 14
+        {255, 255, 255},  // 15
+    };
+    if(index < sizeof(basic_colors) / sizeof(*basic_colors)){
+        return basic_colors[index];
+    }
+
+    // 6x6x6 cube
+    if(index < 232){
+        unsigned int x = index - 16;
+        unsigned int b = x % 6;
+        unsigned int g = ((x - b) / 6) % 6;
+        unsigned int r = (x - b - 6 * g) / 6;
+        return (struct rgb24){r * 51, g * 51, b * 51};
+    }
+
+    // grayscale in 24 steps (ends at 253, but whatever)
+    if(index < 256){
+        unsigned int x = index - 232;
+        return (struct rgb24){x * 11, x * 11, x * 11};
+    }
+
+    fprintf(stderr, "warning: color index exceeds 255: %d\n", index);
+    return (struct rgb24){255, 255, 255};
 }
