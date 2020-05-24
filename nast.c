@@ -129,7 +129,7 @@ typedef struct {
 
     TLine **tlines;
     // ring buffer semantics
-    size_t tlines_cap;   // cap = length of
+    size_t tlines_cap;   // cap = item length of the physical buffer
     size_t tlines_start; // the oldest line in memory
     size_t tlines_end;   // non-inclusive endpoint
 
@@ -2715,14 +2715,19 @@ double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,
         utf8_len += utf8encode(rline->glyphs[i].u, &utf8[utf8_len]);
     }
 
-    // get color from the first glyph
-    struct rgb24 rgb = rline->glyphs[start].fg;
-
     pango_layout_set_text(layout, utf8, utf8_len);
 
     cairo_move_to(cr, x, 0);
+    // draw the background with the background color from the first glyph
+    struct rgb24 rgb = rline->glyphs[start].bg;
     cairo_set_source_rgb(cr, rgb.r / 255., rgb.g / 255., rgb.b / 255.);
+    cairo_rectangle(cr, x, 0, term.grid_w * (end - start), term.grid_h);
+    cairo_fill(cr);
 
+    cairo_move_to(cr, x, 0);
+    // write the text with the foreground color from the first glyph
+    rgb = rline->glyphs[start].fg;
+    cairo_set_source_rgb(cr, rgb.r / 255., rgb.g / 255., rgb.b / 255.);
     pango_cairo_show_layout(cr, layout);
 
     // now get the width of the text we printed

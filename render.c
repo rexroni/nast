@@ -161,8 +161,8 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
     // printf("commit! (%s)\n", str);
     globals_t *g = user_data;
-    // ttywrite(g, str, strlen(str), 0);
-    twrite(str, strlen(str), 0);
+    ttywrite(g, str, strlen(str), 0);
+    // twrite(str, strlen(str), 0);
     gtk_widget_queue_draw(g->darea);
 }
 
@@ -190,11 +190,11 @@ static gboolean tty_read(GIOChannel *src, globals_t *g){
         case G_IO_STATUS_NORMAL: break;
     }
     // printf("read: %s\n", buf);
-    for(size_t i = 0; i < sizeof(buf) / sizeof(*buf); i++){
-        if(buf[i] < 128 && buf[i] > 31) continue;
-        if(buf[i] == '\n') continue;
-        buf[i] = 'X';
-    }
+    // for(size_t i = 0; i < sizeof(buf) / sizeof(*buf); i++){
+    //     if(buf[i] < 128 && buf[i] > 31) continue;
+    //     if(buf[i] == '\n') continue;
+    //     buf[i] = 'X';
+    // }
     twrite(buf, bytes_read, 0);
     // redraw
     gtk_widget_queue_draw(g->darea);
@@ -220,12 +220,18 @@ static gboolean tty_write(GIOChannel *src, globals_t *g){
             case G_IO_STATUS_EOF:
                 die("G_IO_STATUS_EOF during write\n");
             case G_IO_STATUS_AGAIN:
-                // there's more to write, but the buffer is full
-                writable_return_bytes(&g->writable, n - n_written);
-                return TRUE;
+                break;
             case G_IO_STATUS_NORMAL:
                 break;
         }
+
+        if(n_written < n){
+            // return any leftover bytes
+            // there's more to write, but the buffer is full
+            writable_return_bytes(&g->writable, n - n_written);
+            return TRUE;
+        }
+
     }
 
     // we wrote everything we needed to
@@ -356,7 +362,7 @@ int main(int argc, char *argv[]){
 
 
     // write some shit
-    char buf[] = "hello \x1b[35mworld\x1b[m!\r\nthis\r\nis\r\na\r\ntest\r\n";
+    char buf[] = "\x1b[35mhello\x1b[m \x1b[45mworld\x1b[m!\r\nthis \x1b[45mis a\r\n\x1b[30mtest\x1b[m\r\n";
     twrite(buf, sizeof(buf) - 1,  0);
 
     gtk_main();
