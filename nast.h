@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <stdbool.h>
 
 #include <cairo.h>
 #include <pango/pangocairo.h>
@@ -38,6 +39,7 @@ enum glyph_attribute {
     ATTR_WIDE       = 1 << 9,
     ATTR_WDUMMY     = 1 << 10,
     ATTR_BOLD_FAINT = ATTR_BOLD | ATTR_FAINT,
+    ATTR_NORENDER   = 1 << 11,
 };
 
 enum selection_mode {
@@ -82,21 +84,23 @@ typedef Glyph* Line;
 // render line, one line of rendered text
 typedef struct {
     cairo_surface_t *srfc;
-    // which characters in the TLine belong in this rendered line
-    const Glyph *glyphs;
+    Glyph *glyphs;
+    // can this line be rewrapped with the prev/next lines?
+    bool ends_line;
+    /* in order to detect rewrappable lines, we must be able to detect behavior
+       which is not acceptable for rewrapping.  Unacceptable means writing any
+       character which was neither an overwrite of an existing character nor an
+       append to the end of a block of characters starting at the beginning of
+       a line */
+    bool rewrappable;
     size_t n_glyphs;
 } RLine;
 
-// terminal line, might get rendered onto many lines
+// terminal line, points to a set of RLines that contain one real line of text
+// (id = logical index of RLine + forgotten lines)
 typedef struct {
-    // one glyph per character
-    Glyph *glyphs;
-    size_t n_glyphs;
-    size_t glyphs_cap;
-    // rendering results (n_rlines == 0 after tline_unrender())
-    RLine **rlines;
-    size_t n_rlines;
-    size_t rlines_cap;
+    size_t start_id;
+    size_t end_id;
 } TLine;
 
 typedef union {
@@ -158,11 +162,43 @@ struct rgb24 rgb24_from_index(unsigned int index);
 //////
 
 int twrite(const char *, int, int);
-TLine *tline_new(void);
-void tline_free(TLine **tline);
+RLine *rline_new(size_t n_glyphs);
+void rline_free(RLine **rline);
 // insert a glpyh before the index
-void tline_insert_glyph(TLine *tline, size_t idx, Glyph g);
+void rline_insert_glyph(RLine *rline, size_t idx, Glyph g);
 // set a glyph to be something else
-void tline_set_glyph(TLine *tline, size_t idx, Glyph g);
+void rline_set_glyph(RLine *rline, size_t idx, Glyph g);
 
-void trender(cairo_t *cr, double w, double h);
+void trender(
+    cairo_t *cr, double w, double h, double x1, double y1, double x2, double y2
+);
+void tunrender(void);
+void rline_unrender(RLine *rline);
+
+/*
+
+Rendering details:
+
+    ring buffer, with logical indices from y=0 to y=rlines_len()-1
+    "window" is a section of lines of term.rows length that is to be rendered
+    "scroll" is how many unrendered lines are after the window
+    scroll is a render-only concept, and ANSI codes are unaffected
+
+                  rlines
+                   ___
+              y=0 |___|
+                  |___|
+                  |___|
+             ___  |___| __
+            /     |___|   |   y=window_start()
+           /      |___|   |
+  render -+       |___|   |term.rows
+  window   \      |___|   |
+            \___  |___| __| __
+                  |___|       |
+                  |___|       |
+                  |___|       |term.scroll
+                  |___|       |
+ y=rlines_len()-1 |___| ______|
+
+*/

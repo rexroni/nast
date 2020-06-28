@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#define __USE_XOPEN
 #include <wchar.h>
 
 #include "nast.h"
@@ -62,7 +63,7 @@ enum cursor_movement {
 enum cursor_state {
     CURSOR_DEFAULT  = 0,
     CURSOR_WRAPNEXT = 1,
-    CURSOR_ORIGIN   = 2
+    // CURSOR_ORIGIN   = 2
 };
 
 enum charset {
@@ -88,7 +89,7 @@ enum escape_state {
 
 typedef struct {
     Glyph attr; /* current char attributes */
-    // position in TLine, not RLine
+    // position in line
     int x;
     // y position, relative to start of ring buffer
     int y;
@@ -127,11 +128,17 @@ typedef struct {
     double render_w;
     double render_h;
 
-    TLine **tlines;
+    RLine **rlines;
     // ring buffer semantics
-    size_t tlines_cap;   // cap = item length of the physical buffer
-    size_t tlines_start; // the oldest line in memory
-    size_t tlines_end;   // non-inclusive endpoint
+    size_t rlines_cap;   // cap = item length of the physical buffer
+    size_t rlines_start; // the oldest line in memory
+    size_t rlines_end;   // non-inclusive endpoint
+
+    // how many lines we have forgotten in total
+    size_t forgotten;
+
+    // how many unrendered lines are below the window
+    size_t scroll;
 
     // callback for writing to TTY (for obscure control codes)
     void (*ttywrite)(const char *, size_t);
@@ -201,7 +208,6 @@ static void tinsertblank(int);
 static void tinsertblankline(int);
 static int tlinelen(int);
 static void tmoveto(int, int);
-static void tmoveato(int, int);
 static void tnewline(int);
 static void tputtab(int);
 static void tputc(Rune);
@@ -211,7 +217,6 @@ static void tscrolldown(int, int);
 static void tsetattr(int *, int);
 static void tsetchar(Rune, Glyph *, int, int);
 static void tsetdirt(int, int);
-static void tsetscroll(int, int);
 static void tswapscreen(void);
 static void tsetmode(int, int, int *, int);
 // static int twrite(const char *, int, int);
@@ -249,20 +254,25 @@ static int cmdfd;
 static pid_t pid;
 
 // get the physical index from an offset (a logical index)
-static inline size_t tlines_idx(size_t idx){
-    return (term.tlines_start + idx) % (term.tlines_cap + 1);
+static inline size_t rlines_idx(size_t idx){
+    return (term.rlines_start + idx) % (term.rlines_cap + 1);
 }
 
-static inline TLine *get_tline(size_t idx){
-    return term.tlines[tlines_idx(idx)];
+static inline RLine *get_rline(size_t idx){
+    return term.rlines[rlines_idx(idx)];
 }
 
-static inline size_t tlines_len(void){
-    if(term.tlines_end >= term.tlines_start){
-        return term.tlines_end - term.tlines_start;
+static inline size_t rlines_len(void){
+    if(term.rlines_end >= term.rlines_start){
+        return term.rlines_end - term.rlines_start;
     }else{
-        return term.tlines_end + (term.tlines_cap + 1) - term.tlines_start;
+        return term.rlines_end + (term.rlines_cap + 1) - term.rlines_start;
     }
+}
+
+// the logical index of the first line in the window, accounting for scroll
+static inline size_t window_start(){
+    return rlines_len() - term.row - term.scroll;
 }
 
 static uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
@@ -740,6 +750,8 @@ execsh(char *cmd, char **args)
     signal(SIGTERM, SIG_DFL);
     signal(SIGALRM, SIG_DFL);
 
+    // TODO: support more CSI commands so that zsh works
+    execvp("/bin/sh", (char*[]){"/bin/sh", NULL});
     execvp(prog, args);
     _exit(1);
 }
@@ -915,8 +927,9 @@ tsetdirt(int top, int bot)
     LIMIT(top, 0, term.row-1);
     LIMIT(bot, 0, term.row-1);
 
-    for (i = top; i <= bot; i++)
-        term.dirty[i] = 1;
+    for (i = top; i <= bot; i++){
+        rline_unrender(get_rline(i + window_start()));
+    }
 }
 
 void
@@ -1059,7 +1072,8 @@ fail:
     return -1;
 }
 
-void tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size_t))
+void
+tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size_t))
 {
     term = (Term){
         .c = {
@@ -1074,14 +1088,16 @@ void tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size
     }
 
     // allocate history
-    term.tlines_cap = 10000 - 1;
-    size_t nbytes = (term.tlines_cap + 1) * sizeof(*term.tlines);
-    term.tlines = xmalloc(nbytes);
+    term.rlines_cap = 10000 - 1;
+    size_t nbytes = (term.rlines_cap + 1) * sizeof(*term.rlines);
+    term.rlines = xmalloc(nbytes);
     // all lines start empty
-    memset(term.tlines, 0, nbytes);
+    memset(term.rlines, 0, nbytes);
 
-    // start with the first line allocated
-    term.tlines[term.tlines_end++] = tline_new();
+    // start with the first window of lines allocated
+    for(size_t i = 0; i < row; i++){
+        term.rlines[term.rlines_end++] = rline_new(col);
+    }
 
     tresize(col, row);
     treset();
@@ -1172,44 +1188,34 @@ selscroll(int orig, int n)
 void
 tnewline(int first_col)
 {
-    // TODO: what happens if the cursor is not at the bottom of the buffer?
-
-    // is ring buffer full?
-    if(tlines_len() == term.tlines_cap){
-        // free oldest tline
-        tline_free(&term.tlines[term.top]);
-        // forget the oldest history element (start of the ring buffer)
-        term.tlines_start = tlines_idx(term.tlines_start + 1);
-        // cursor position is relative to start of ring buffer, which changed
-        term.c.y--;
-    }
-
-    // extend the buffer
-    term.tlines[term.tlines_end] = tline_new();
-    term.tlines_end = tlines_idx(term.tlines_end + 1);
-
-    // move the cursor down a line
+    // move the cursor down a line;
     term.c.y++;
 
-    if(first_col){
-        tmoveto(0, term.c.y);
-    }else{
-        // don't insert entire blank lines of spaces
-        term.c.x = term.c.x % term.col;
-        for(size_t i = 0; i < term.c.x; i++){
-            // insert spaces before the character
-            Glyph g = {
-                .u = ' ',
-                .mode = term.mode,
-                .fg = term.c.attr.fg,
-                .bg = term.c.attr.bg,
-            };
-            tline_insert_glyph(get_tline(term.c.y), i, g);
+    // do we need a new line?
+    if(term.c.y == rlines_len()){
+        // is ring buffer full?
+        if(rlines_len() == term.rlines_cap){
+            // free oldest rline
+            rline_free(&term.rlines[term.rlines_start]);
+            // forget the oldest history element (start of the ring buffer)
+            term.rlines_start = rlines_idx(term.rlines_start + 1);
+            // cursor position is relative to start of ring buffer
+            term.c.y--;
+            // TODO: deal with tlines
         }
-        tmoveto(term.c.x, term.c.y);
+
+        // extend the buffer
+        term.rlines[term.rlines_end] = rline_new(term.col);
+        term.rlines_end = rlines_idx(term.rlines_end + 1);
+
+        // hold the scroll window in place, if needed and possible
+        if(term.scroll){
+            term.scroll++;
+            LIMIT(term.scroll, 0, rlines_len() - term.row);
+        }
     }
 
-    //tmoveto(first_col ? 0 : term.c.x, term.c.y);
+    tmoveto(first_col ? 0 : term.c.x, term.c.y);
 }
 
 void
@@ -1242,28 +1248,13 @@ csiparse(void)
     csiescseq.mode[1] = (p < csiescseq.buf+csiescseq.len) ? *p : '\0';
 }
 
-/* for absolute user moves, when decom is set */
-void
-tmoveato(int x, int y)
-{
-    tmoveto(x, y + ((term.c.state & CURSOR_ORIGIN) ? term.top: 0));
-}
-
 void
 tmoveto(int x, int y)
 {
-    int miny, maxy;
-
-    if (term.c.state & CURSOR_ORIGIN) {
-        miny = term.top;
-        maxy = term.bot;
-    } else {
-        miny = 0;
-        maxy = term.row - 1;
-    }
+    // tmoveto() always acts as if term.scroll==0
     term.c.state &= ~CURSOR_WRAPNEXT;
     term.c.x = LIMIT(x, 0, term.col-1);
-    term.c.y = LIMIT(y, miny, maxy);
+    term.c.y = LIMIT(y, rlines_len() - term.row, rlines_len() - 1);
 }
 
 void
@@ -1306,7 +1297,6 @@ void
 tclearregion(int x1, int y1, int x2, int y2)
 {
     int x, y, temp;
-    Glyph *gp;
 
     if (x1 > x2)
         temp = x1, x1 = x2, x2 = temp;
@@ -1318,16 +1308,22 @@ tclearregion(int x1, int y1, int x2, int y2)
     LIMIT(y1, 0, term.row-1);
     LIMIT(y2, 0, term.row-1);
 
+    // account for scroll
+    y1 += window_start();
+    y2 += window_start();
+
     for (y = y1; y <= y2; y++) {
-        term.dirty[y] = 1;
+        RLine *rline = get_rline(y);
+        rline_unrender(rline);
+
         for (x = x1; x <= x2; x++) {
-            gp = &term.line[y][x];
             if (selected(x, y))
                 selclear();
-            gp->fg = term.c.attr.fg;
-            gp->bg = term.c.attr.bg;
-            gp->mode = 0;
-            gp->u = ' ';
+            rline->glyphs[x] = (Glyph){
+                .mode = ATTR_NORENDER,
+                .fg = term.c.attr.fg,
+                .bg = term.c.attr.bg,
+            };
         }
     }
 }
@@ -1529,22 +1525,6 @@ tsetattr(int *attr, int l)
 }
 
 void
-tsetscroll(int t, int b)
-{
-    int temp;
-
-    LIMIT(t, 0, term.row-1);
-    LIMIT(b, 0, term.row-1);
-    if (t > b) {
-        temp = t;
-        t = b;
-        b = temp;
-    }
-    term.top = t;
-    term.bot = b;
-}
-
-void
 tsetmode(int priv, int set, int *args, int narg)
 {
     int alt, *lim;
@@ -1559,8 +1539,9 @@ tsetmode(int priv, int set, int *args, int narg)
                 xsetmode(set, MODE_REVERSE);
                 break;
             case 6: /* DECOM -- Origin */
-                MODBIT(term.c.state, set, CURSOR_ORIGIN);
-                tmoveato(0, 0);
+                die("DECOM not supported\n");
+                // MODBIT(term.c.state, set, CURSOR_ORIGIN);
+                // tmoveato(0, 0);
                 break;
             case 7: /* DECAWM -- Auto wrap */
                 MODBIT(term.mode, set, MODE_WRAP);
@@ -1761,7 +1742,7 @@ csihandle(void)
     case 'f': /* HVP */
         DEFAULT(csiescseq.arg[0], 1);
         DEFAULT(csiescseq.arg[1], 1);
-        tmoveato(csiescseq.arg[1]-1, csiescseq.arg[0]-1);
+        tmoveto(csiescseq.arg[1]-1, csiescseq.arg[0]-1);
         break;
     case 'I': /* CHT -- Cursor Forward Tabulation <n> tab stops */
         DEFAULT(csiescseq.arg[0], 1);
@@ -1770,6 +1751,8 @@ csihandle(void)
     case 'J': /* ED -- Clear screen */
         switch (csiescseq.arg[0]) {
         case 0: /* below */
+            printf("tclearregion(%d, %d, %d, %d)\n", term.c.x, term.c.y, term.col-1, term.c.y);
+            printf("window_start(%zu)\n", window_start());
             tclearregion(term.c.x, term.c.y, term.col-1, term.c.y);
             if (term.c.y < term.row-1) {
                 tclearregion(0, term.c.y+1, term.col-1,
@@ -1836,7 +1819,7 @@ csihandle(void)
         break;
     case 'd': /* VPA -- Move to <row> */
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveato(term.c.x, csiescseq.arg[0]-1);
+        tmoveto(term.c.x, csiescseq.arg[0]-1);
         break;
     case 'h': /* SM -- Set terminal mode */
         tsetmode(csiescseq.priv, 1, csiescseq.arg, csiescseq.narg);
@@ -1852,14 +1835,15 @@ csihandle(void)
         }
         break;
     case 'r': /* DECSTBM -- Set Scrolling Region */
-        if (csiescseq.priv) {
-            goto unknown;
-        } else {
-            DEFAULT(csiescseq.arg[0], 1);
-            DEFAULT(csiescseq.arg[1], term.row);
-            tsetscroll(csiescseq.arg[0]-1, csiescseq.arg[1]-1);
-            tmoveato(0, 0);
-        }
+        die("set scrolling region not supported\n");
+        // if (csiescseq.priv) {
+        //     goto unknown;
+        // } else {
+        //     DEFAULT(csiescseq.arg[0], 1);
+        //     DEFAULT(csiescseq.arg[1], term.row);
+        //     tsetscroll(csiescseq.arg[0]-1, csiescseq.arg[1]-1);
+        //     tmoveato(0, 0);
+        // }
         break;
     case 's': /* DECSC -- Save cursor position (ANSI.SYS) */
         tcursor(CURSOR_SAVE);
@@ -2370,7 +2354,7 @@ tputc(Rune u)
     char c[UTF_SIZ];
     int control;
     int width, len;
-    Glyph *gp;
+    // Glyph *gp;
 
     control = ISCONTROL(u);
     if (!IS_SET(MODE_UTF8) && !IS_SET(MODE_SIXEL)) {
@@ -2485,15 +2469,26 @@ check_control_code:
     Glyph g = term.c.attr;
     g.u = u;
 
-    TLine *tline = get_tline(term.c.y);
-    if(term.c.x == tline->n_glyphs || IS_SET(MODE_INSERT)){
-        //printf("tline_insert_glyph(%d, %c)\n", term.c.x, (char)g.u);
-        // we are at the end of the line or in insert mode
-        tline_insert_glyph(tline, term.c.x++, g);
+    RLine *rline = get_rline(term.c.y);
+
+    if(term.c.state & CURSOR_WRAPNEXT){
+        rline->glyphs[term.c.x].mode |= ATTR_WRAP;
+        tnewline(1);
+        rline = get_rline(term.c.y);
+    }
+
+    // TODO: handle double-width characters
+
+    if(IS_SET(MODE_INSERT)){
+        rline_insert_glyph(rline, term.c.x, g);
     }else{
-        //printf("tline_set_glyph(%d, %c)\n", term.c.x, (char)g.u);
-        // we should overwrite something
-        tline_set_glyph(tline, term.c.x++, g);
+        rline_set_glyph(rline, term.c.x, g);
+    }
+
+    if(term.c.x + width < term.col){
+        tmoveto(term.c.x + width, term.c.y);
+    }else{
+        term.c.state |= CURSOR_WRAPNEXT;
     }
 }
 
@@ -2535,11 +2530,8 @@ twrite(const char *buf, int buflen, int show_ctrl)
 void
 tresize(int col, int row)
 {
-    int i;
-    int minrow = MIN(row, term.row);
-    int mincol = MIN(col, term.col);
+    printf("tresize(%d, %d)\n", col, row);
     int *bp;
-    TCursor c;
 
     if (col < 1 || row < 1) {
         fprintf(stderr,
@@ -2547,24 +2539,32 @@ tresize(int col, int row)
         return;
     }
 
-    /*
-     * slide screen to keep cursor where we expect it -
-     * tscrollup would work here, but we can optimize to
-     * memmove because we're freeing the earlier lines
-     */
-    for (i = 0; i <= term.c.y - row; i++) {
-        free(term.line[i]);
-        free(term.alt[i]);
+    tunrender();
+
+    // TODO: redraw existing rlines with new linebreaks
+    // (until then, just extend or trim lines as needed)
+    for(size_t i = 0; i < rlines_len(); i++){
+        RLine *rline = get_rline(i);
+        rline->glyphs = xrealloc(rline->glyphs, sizeof(*rline->glyphs) * col);
+        rline->n_glyphs = col;
+        for(int c = term.col; c < col; c++){
+            rline->glyphs[c] = (Glyph){ .mode = ATTR_NORENDER };
+        }
     }
-    /* ensure that both src and dst are not NULL */
-    if (i > 0) {
-        memmove(term.line, term.line + i, row * sizeof(Line));
-        memmove(term.alt, term.alt + i, row * sizeof(Line));
+
+    // make sure we have at least enough rlines to fill the screen
+    while(rlines_len() < row){
+        term.rlines[term.rlines_end] = rline_new(col);
+        term.rlines_end = rlines_idx(term.rlines_end + 1);
     }
-    for (i += row; i < term.row; i++) {
-        free(term.line[i]);
-        free(term.alt[i]);
-    }
+
+    // TODO: deal with scroll at some point
+    // (until then, just make sure scroll is always valid)
+    term.scroll = 0;
+
+    // TODO: deal with cursor at some point
+
+    // TODO: deal with altscreen
 
     /* resize to new height */
     term.line = xrealloc(term.line, row * sizeof(Line));
@@ -2572,17 +2572,7 @@ tresize(int col, int row)
     term.dirty = xrealloc(term.dirty, row * sizeof(*term.dirty));
     term.tabs = xrealloc(term.tabs, col * sizeof(*term.tabs));
 
-    /* resize each row to new width, zero-pad if needed */
-    for (i = 0; i < minrow; i++) {
-        term.line[i] = xrealloc(term.line[i], col * sizeof(Glyph));
-        term.alt[i]  = xrealloc(term.alt[i],  col * sizeof(Glyph));
-    }
-
-    /* allocate any new rows */
-    for (/* i = minrow */; i < row; i++) {
-        term.line[i] = xmalloc(col * sizeof(Glyph));
-        term.alt[i] = xmalloc(col * sizeof(Glyph));
-    }
+    // fix tabs
     if (col > term.col) {
         bp = term.tabs + term.col;
 
@@ -2592,26 +2582,13 @@ tresize(int col, int row)
         for (bp += tabspaces; bp < term.tabs + col; bp += tabspaces)
             *bp = 1;
     }
+
     /* update terminal size */
     term.col = col;
     term.row = row;
-    /* reset scrolling region */
-    tsetscroll(0, row-1);
+
     /* make use of the LIMIT in tmoveto */
     tmoveto(term.c.x, term.c.y);
-    /* Clearing both screens (it makes dirty all lines) */
-    c = term.c;
-    for (i = 0; i < 2; i++) {
-        if (mincol < col && 0 < minrow) {
-            tclearregion(mincol, 0, col - 1, minrow - 1);
-        }
-        if (0 < col && minrow < row) {
-            tclearregion(0, minrow, col - 1, row - 1);
-        }
-        tswapscreen();
-        tcursor(CURSOR_LOAD);
-    }
-    term.c = c;
 }
 
 void
@@ -2683,6 +2660,7 @@ int format_eq(Glyph a, Glyph b){
         && a.bg.r == b.bg.r && a.bg.g == b.bg.g && a.bg.b == b.bg.b;
 }
 
+
 void rline_free(RLine **rline){
     if(!*rline) return;
 
@@ -2695,11 +2673,13 @@ void rline_free(RLine **rline){
     *rline = NULL;
 }
 
-
-// create an RLine with a collection of glyphs, but don't render it until later
-RLine *rline_new(const Glyph *glyphs, size_t n_glyphs){
+RLine *rline_new(size_t n_glyphs){
     RLine *rline = xmalloc(sizeof(*rline));
+    Glyph *glyphs = xmalloc(sizeof(*glyphs) * n_glyphs);
     *rline = (RLine){.glyphs=glyphs, .n_glyphs=n_glyphs};
+    for(size_t i = 0; i < rline->n_glyphs; i++){
+        rline->glyphs[i] = (Glyph){ .mode = ATTR_NORENDER };
+    }
     return rline;
 }
 
@@ -2707,6 +2687,10 @@ RLine *rline_new(const Glyph *glyphs, size_t n_glyphs){
 // render
 double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,
         double x, size_t start, size_t end){
+    // skip NORENDER chunks
+    if(rline->glyphs[start].mode & ATTR_NORENDER){
+        return x + term.grid_w * (end - start);
+    }
     // expand glyphs back into utf8 for pango
     // TODO: support arbitrary-length lines
     char utf8[4096];
@@ -2739,9 +2723,6 @@ double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,
 
 
 void rline_render(RLine *rline){
-    // handle the zero-width line case
-    if(rline->n_glyphs == 0) return;
-
     // handle the already-been-rendered case
     if(rline->srfc) return;
 
@@ -2776,170 +2757,74 @@ void rline_render(RLine *rline){
     cairo_destroy(cr);
 }
 
+void rline_unrender(RLine *rline){
+    cairo_surface_destroy(rline->srfc);
+    rline->srfc = NULL;
+}
+
 void rline_draw(RLine *rline, cairo_t *cr, size_t line_offset){
-    // handle the zero-width line case
-    if(rline->n_glyphs == 0) return;
     copy_rectangle(cr, rline->srfc, 0, term.grid_h * line_offset,
             term.render_w, term.grid_h);
 }
 
-TLine *tline_new(void){
-    TLine *tline = xmalloc(sizeof(*tline));
-    *tline = (TLine){0};
-
-    // start with a single glyph of capacity
-    tline->glyphs = xmalloc(sizeof(*tline->glyphs));
-    tline->n_glyphs = 0;
-    tline->glyphs_cap = 1;
-
-    // start with a single rline of capacity
-    tline->rlines = xmalloc(sizeof(*tline->rlines));
-    tline->n_rlines = 0;
-    tline->rlines_cap = 1;
-
-    return tline;
-}
-
-void tline_free(TLine **tline){
-    if(!*tline) return;
-
-    for(size_t i = 0; i < (*tline)->n_rlines; i++){
-        rline_free(&(*tline)->rlines[i]);
-    }
-
-    free((*tline)->glyphs);
-
-    free(*tline);
-    *tline = NULL;
-}
-
-
-// undo any rendering that's already been cached
-void tline_unrender(TLine *tline){
-    // free any rlines
-    for(size_t i = 0; i < tline->n_rlines; i++){
-        rline_free(&tline->rlines[i]);
-    }
-    tline->n_rlines = 0;
-}
-
 // insert a glyph before the index
-void tline_insert_glyph(TLine *tline, size_t idx, Glyph g){
-    // if there isn't room, realloc
-    if(tline->n_glyphs == tline->glyphs_cap){
-        tline->glyphs_cap *= 2;
-        tline->glyphs = xrealloc(tline->glyphs, sizeof(*tline->glyphs) * tline->glyphs_cap);
-    }
+void rline_insert_glyph(RLine *rline, size_t idx, Glyph g){
+    // TODO: is it right to just drop the final character when we do this?
+    // TODO: xterm doesn't seem to have insert mode, should we even support it?
+    // move all the glyphs from idx forwards, dropping the last glyph
+    size_t glyphs_to_move = (rline->n_glyphs - 1) - idx;
+    size_t bytes_to_move = sizeof(Glyph) * glyphs_to_move;
+    memmove(&rline->glyphs[idx+1], &rline->glyphs[idx], bytes_to_move);
 
-    memmove(&tline->glyphs[idx+1], &tline->glyphs[idx], tline->n_glyphs - idx);
-
-    tline->n_glyphs++;
-
-    tline->glyphs[idx] = g;
+    rline->glyphs[idx] = g;
 
     // mark this line as dirty
-    tline_unrender(tline);
+    rline_unrender(rline);
 }
 
 // set a glyph to be something else
-void tline_set_glyph(TLine *tline, size_t idx, Glyph g){
-    // if there isn't room, realloc
-    if(idx == tline->glyphs_cap){
-        tline->glyphs_cap *= 2;
-        tline->glyphs = xrealloc(tline->glyphs, sizeof(*tline->glyphs) * tline->glyphs_cap);
-    }
-
-    tline->glyphs[idx] = g;
+void rline_set_glyph(RLine *rline, size_t idx, Glyph g){
+    rline->glyphs[idx] = g;
 
     // mark this line as dirty
-    tline_unrender(tline);
-}
-
-// add an unrendered RLine to this tline
-void tline_add_rline(TLine *tline, size_t start, size_t len){
-    if(tline->n_rlines == tline->rlines_cap){
-        tline->rlines_cap *= 2;
-        tline->rlines = xrealloc(tline->rlines, sizeof(*tline->rlines) * tline->rlines_cap);
-    }
-    tline->rlines[tline->n_rlines++] = rline_new(&tline->glyphs[start], len);
-}
-
-// render this terminal line, return the number of render lines still needed
-size_t tline_render(TLine *tline, size_t width, size_t lines_left){
-    /* If we have any rlines, assume they are still valid.  They would all have
-       been freed had tline_unrender() been called. */
-    if(tline->n_rlines == 0 && tline->n_glyphs > 0){
-        // break tline into unrendered rlines
-        size_t start = 0;
-        size_t render_left = term.col;
-        size_t i;
-        for(i = 0; i < tline->n_glyphs; i++){
-            Rune u = tline->glyphs[i].u;
-            // TODO: measure the real width of this character
-            size_t char_width = 1;
-            if(char_width > render_left){
-                // too many characters, break the line here
-                tline_add_rline(tline, start, i - start);
-                start = i;
-                render_left = term.col;
-            }
-            // add this character to the line
-            render_left -= char_width;
-        }
-        tline_add_rline(tline, start, i - start);
-    }
-
-    // render rlines in reverse order
-    for(size_t i = 0; i < tline->n_rlines; i++){
-        rline_render(tline->rlines[tline->n_rlines - i - 1]);
-        if(!--lines_left) break;
-    }
-
-    return lines_left;
-}
-
-size_t tline_draw(TLine *tline, cairo_t *cr, size_t lines_left){
-    // draw rlines in reverse order
-    for(size_t i = 0; i < tline->n_rlines; i++){
-        rline_draw(tline->rlines[tline->n_rlines - i - 1], cr, --lines_left);
-        if(!lines_left) break;
-    }
-    return lines_left;
+    rline_unrender(rline);
 }
 
 // delete any rendered artifacts but leave the text alone
 void tunrender(void){
-    for(size_t i = 0; i < tlines_len(); i++){
-        tline_unrender(get_tline(i));
+    for(size_t i = 0; i < rlines_len(); i++){
+        rline_unrender(get_rline(i));
     }
 }
 
-void trender(cairo_t *cr, double w, double h){
+void trender(
+    cairo_t *cr, double w, double h, double x1, double y1, double x2, double y2
+){
+    // TODO: only rerender the dirty parts
+    (void)x1; (void)y1; (void)x2; (void)y2;
     if(w != term.render_w || h != term.render_h){
         // delete old rendering
         tunrender();
-        // save new dimensions
         term.render_w = w;
         term.render_h = h;
-        term.col = term.render_w / term.grid_w;
-        term.row = term.render_h / term.grid_h;
+        // resize the teriminal?
+        int col = term.render_w / term.grid_w;
+        int row = term.render_h / term.grid_h;
+        if(col != term.col || row != term.row){
+            printf("resize due to render(%f, %f)\n", w, h);
+            tresize(col, row);
+        }
     }
 
-    size_t lines_to_render = term.row;
-    for(size_t i = 0; i < tlines_len() && lines_to_render > 0; i++){
+    size_t start_index = window_start();
+    size_t last_index = start_index + term.row;;
+    for(size_t i = 0; i + start_index < last_index; i++){
         // get the line at this index
-        TLine *tline = get_tline(tlines_len() - i - 1);
+        RLine *rline = get_rline(i + start_index);
         // render this line
-        lines_to_render = tline_render(tline, term.render_w, lines_to_render);
-    }
-
-    // now draw each line onto the cairo surface
-    lines_to_render = term.row - lines_to_render;
-    for(size_t i = 0; i < tlines_len() && lines_to_render > 0; i++){
-        // get the line at this index
-        TLine *tline = get_tline(tlines_len() - i - 1);
-        // draw this line
-        lines_to_render = tline_draw(tline, cr, lines_to_render);
+        rline_render(rline);
+        // draw this line onto the cairo surface
+        rline_draw(rline, cr, i);
     }
 }
 
