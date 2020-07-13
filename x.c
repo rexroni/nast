@@ -20,6 +20,12 @@ static char *argv0;
 #include "nast.h"
 #include "win.h"
 
+static void die_on_ttywrite(const char *buf, size_t len){
+    (void)buf; (void)len;
+    die("we don't support tty writes from the terminal yet\n"
+        "also... why are you calling this from x.c??\n");
+}
+
 /* types used in config.h */
 typedef struct {
     uint mod;

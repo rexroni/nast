@@ -140,8 +140,8 @@ typedef struct {
     // how many unrendered lines are below the window
     size_t scroll;
 
-    // callback for writing to TTY (for obscure control codes)
-    void (*ttywrite)(const char *, size_t);
+    // callbacks
+    THooks *hooks;
 
     Line *line;   /* screen */
     Line *alt;    /* alternate screen */
@@ -200,7 +200,8 @@ static void tprinter(char *, size_t);
 static void tdumpsel(void);
 static void tdumpline(int);
 static void tdump(void);
-static void tclearregion(int, int, int, int);
+static void tclearregion_abs(int, int, int, int);
+static void tclearregion_term(int, int, int, int);
 static void tcursor(int);
 static void tdeletechar(int);
 static void tdeleteline(int);
@@ -270,9 +271,22 @@ static inline size_t rlines_len(void){
     }
 }
 
-// the logical index of the first line in the window, accounting for scroll
-static inline size_t window_start(){
-    return rlines_len() - term.row - term.scroll;
+// convert absolute index to a view index, or what is currently in scroll view
+static inline size_t abs2view(size_t idx){
+    return rlines_len() - term.row - term.scroll + idx;
+}
+
+static inline size_t view2abs(size_t idx){
+    return idx + (rlines_len() - term.row - term.scroll);
+}
+
+// convert absolute index to a terminal index, or the bottom term.row rows
+static inline size_t abs2term(size_t idx){
+    return idx - (rlines_len() - term.row);
+}
+
+static inline size_t term2abs(size_t idx){
+    return idx + (rlines_len() - term.row);
 }
 
 static uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
@@ -928,7 +942,7 @@ tsetdirt(int top, int bot)
     LIMIT(bot, 0, term.row-1);
 
     for (i = top; i <= bot; i++){
-        rline_unrender(get_rline(i + window_start()));
+        rline_unrender(get_rline(term2abs(i)));
     }
 }
 
@@ -990,7 +1004,7 @@ treset(void)
     for (i = 0; i < 2; i++) {
         tmoveto(0, 0);
         tcursor(CURSOR_SAVE);
-        tclearregion(0, 0, term.col-1, term.row-1);
+        tclearregion_abs(0, 0, term.col-1, rlines_len()-1);
         tswapscreen();
     }
 }
@@ -1073,13 +1087,13 @@ fail:
 }
 
 void
-tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size_t))
+tnew(int col, int row, char *font_name, THooks *hooks)
 {
     term = (Term){
         .c = {
             .attr = { .fg = defaultfg, .bg = defaultbg }
         },
-        .ttywrite = ttywrite,
+        .hooks = hooks,
     };
 
     int ret = tfont(font_name, &term.desc, &term.grid_w, &term.grid_h);
@@ -1124,7 +1138,7 @@ tscrolldown(int orig, int n)
     LIMIT(n, 0, term.bot-orig+1);
 
     tsetdirt(orig, term.bot-n);
-    tclearregion(0, term.bot-n+1, term.col-1, term.bot);
+    tclearregion_term(0, term.bot-n+1, term.col-1, term.bot);
 
     for (i = term.bot; i >= orig+n; i--) {
         temp = term.line[i];
@@ -1143,7 +1157,7 @@ tscrollup(int orig, int n)
 
     LIMIT(n, 0, term.bot-orig+1);
 
-    tclearregion(0, orig, term.col-1, orig+n-1);
+    tclearregion_term(0, orig, term.col-1, orig+n-1);
     tsetdirt(orig+n, term.bot);
 
     for (i = orig; i <= term.bot-n; i++) {
@@ -1294,7 +1308,7 @@ tsetchar(Rune u, Glyph *attr, int x, int y)
 }
 
 void
-tclearregion(int x1, int y1, int x2, int y2)
+tclearregion_abs(int x1, int y1, int x2, int y2)
 {
     int x, y, temp;
 
@@ -1307,10 +1321,6 @@ tclearregion(int x1, int y1, int x2, int y2)
     LIMIT(x2, 0, term.col-1);
     LIMIT(y1, 0, term.row-1);
     LIMIT(y2, 0, term.row-1);
-
-    // account for scroll
-    y1 += window_start();
-    y2 += window_start();
 
     for (y = y1; y <= y2; y++) {
         RLine *rline = get_rline(y);
@@ -1329,20 +1339,28 @@ tclearregion(int x1, int y1, int x2, int y2)
 }
 
 void
+tclearregion_term(int x1, int y1, int x2, int y2)
+{
+    tclearregion_abs(x1, term2abs(y1), x2, term2abs(y2));
+}
+
+void
 tdeletechar(int n)
 {
     int dst, src, size;
-    Glyph *line;
 
     LIMIT(n, 0, term.col - term.c.x);
 
     dst = term.c.x;
     src = term.c.x + n;
     size = term.col - src;
-    line = term.line[term.c.y];
+    RLine *rline = get_rline(term.c.y);
 
-    memmove(&line[dst], &line[src], size * sizeof(Glyph));
-    tclearregion(term.col-n, term.c.y, term.col-1, term.c.y);
+    Glyph *glyphs = rline->glyphs;
+    memmove(&glyphs[dst], &glyphs[src], size * sizeof(*glyphs));
+    tclearregion_term(
+        term.col-n, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
+    );
 }
 
 void
@@ -1359,7 +1377,9 @@ tinsertblank(int n)
     line = term.line[term.c.y];
 
     memmove(&line[dst], &line[src], size * sizeof(Glyph));
-    tclearregion(src, term.c.y, dst - 1, term.c.y);
+    tclearregion_term(
+        src, abs2term(term.c.y), dst - 1, abs2term(term.c.y)
+    );
 }
 
 void
@@ -1533,7 +1553,7 @@ tsetmode(int priv, int set, int *args, int narg)
         if (priv) {
             switch (*args) {
             case 1: /* DECCKM -- Cursor key */
-                xsetmode(set, MODE_APPCURSOR);
+                term.hooks->set_appcursor(term.hooks, set);
                 break;
             case 5: /* DECSCNM -- Reverse video */
                 xsetmode(set, MODE_REVERSE);
@@ -1599,8 +1619,7 @@ tsetmode(int priv, int set, int *args, int narg)
                     break;
                 alt = IS_SET(MODE_ALTSCREEN);
                 if (alt) {
-                    tclearregion(0, 0, term.col-1,
-                            term.row-1);
+                    tclearregion_abs(0, 0, term.col-1, rlines_len()-1);
                 }
                 if (set ^ alt) /* set is always 1 or 0 */
                     tswapscreen();
@@ -1702,7 +1721,7 @@ csihandle(void)
         break;
     case 'c': /* DA -- Device Attributes */
         if (csiescseq.arg[0] == 0)
-            term.ttywrite(vtiden, strlen(vtiden));
+            term.hooks->ttywrite(term.hooks, vtiden, strlen(vtiden));
         break;
     case 'C': /* CUF -- Cursor <n> Forward */
     case 'a': /* HPR -- Cursor <n> Forward */
@@ -1751,21 +1770,28 @@ csihandle(void)
     case 'J': /* ED -- Clear screen */
         switch (csiescseq.arg[0]) {
         case 0: /* below */
-            printf("tclearregion(%d, %d, %d, %d)\n", term.c.x, term.c.y, term.col-1, term.c.y);
-            printf("window_start(%zu)\n", window_start());
-            tclearregion(term.c.x, term.c.y, term.col-1, term.c.y);
+            tclearregion_term(
+                term.c.x, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
+            );
             if (term.c.y < term.row-1) {
-                tclearregion(0, term.c.y+1, term.col-1,
-                        term.row-1);
+                tclearregion_term(
+                    0, abs2term(term.c.y+1), term.col-1, abs2term(term.row-1)
+                );
             }
             break;
         case 1: /* above */
             if (term.c.y > 1)
-                tclearregion(0, 0, term.col-1, term.c.y-1);
-            tclearregion(0, term.c.y, term.c.x, term.c.y);
+                tclearregion_term(
+                    0, abs2term(0), term.col-1, abs2term(term.c.y-1)
+                );
+            tclearregion_term(
+                0, abs2term(term.c.y), term.c.x, abs2term(term.c.y)
+            );
             break;
         case 2: /* all */
-            tclearregion(0, 0, term.col-1, term.row-1);
+            tclearregion_term(
+                0, abs2term(0), term.col-1, abs2term(term.row-1)
+            );
             break;
         default:
             goto unknown;
@@ -1774,14 +1800,19 @@ csihandle(void)
     case 'K': /* EL -- Clear line */
         switch (csiescseq.arg[0]) {
         case 0: /* right */
-            tclearregion(term.c.x, term.c.y, term.col-1,
-                    term.c.y);
+            tclearregion_term(
+                term.c.x, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
+            );
             break;
         case 1: /* left */
-            tclearregion(0, term.c.y, term.c.x, term.c.y);
+            tclearregion_term(
+                0, abs2term(term.c.y), term.c.x, abs2term(term.c.y)
+            );
             break;
         case 2: /* all */
-            tclearregion(0, term.c.y, term.col-1, term.c.y);
+            tclearregion_term(
+                0, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
+            );
             break;
         }
         break;
@@ -1806,8 +1837,12 @@ csihandle(void)
         break;
     case 'X': /* ECH -- Erase <n> char */
         DEFAULT(csiescseq.arg[0], 1);
-        tclearregion(term.c.x, term.c.y,
-                term.c.x + csiescseq.arg[0] - 1, term.c.y);
+        tclearregion_term(
+            term.c.x,
+            abs2term(term.c.y),
+            term.c.x + csiescseq.arg[0] - 1,
+            abs2term(term.c.y)
+        );
         break;
     case 'P': /* DCH -- Delete <n> char */
         DEFAULT(csiescseq.arg[0], 1);
@@ -1831,7 +1866,7 @@ csihandle(void)
         if (csiescseq.arg[0] == 6) {
             len = snprintf(buf, sizeof(buf),"\033[%i;%iR",
                     term.c.y+1, term.c.x+1);
-            term.ttywrite(buf, len);
+            term.hooks->ttywrite(term.hooks, buf, len);
         }
         break;
     case 'r': /* DECSTBM -- Set Scrolling Region */
@@ -2245,7 +2280,7 @@ tcontrolcode(uchar ascii)
     case 0x99:   /* TODO: SGCI */
         break;
     case 0x9a:   /* DECID -- Identify Terminal */
-        term.ttywrite(vtiden, strlen(vtiden));
+        term.hooks->ttywrite(term.hooks, vtiden, strlen(vtiden));
         break;
     case 0x9b:   /* TODO: CSI */
     case 0x9c:   /* TODO: ST */
@@ -2317,7 +2352,7 @@ eschandle(uchar ascii)
         }
         break;
     case 'Z': /* DECID -- Identify Terminal */
-        term.ttywrite(vtiden, strlen(vtiden));
+        term.hooks->ttywrite(term.hooks, vtiden, strlen(vtiden));
         break;
     case 'c': /* RIS -- Reset to initial state */
         treset();
@@ -2325,9 +2360,10 @@ eschandle(uchar ascii)
         xloadcols();
         break;
     case '=': /* DECPAM -- Application keypad */
-        xsetmode(1, MODE_APPKEYPAD);
+        term.hooks->set_appkeypad(term.hooks, 1);
         break;
     case '>': /* DECPNM -- Normal keypad */
+        term.hooks->set_appkeypad(term.hooks, 0);
         xsetmode(0, MODE_APPKEYPAD);
         break;
     case '7': /* DECSC -- Save Cursor */
@@ -2558,11 +2594,41 @@ tresize(int col, int row)
         term.rlines_end = rlines_idx(term.rlines_end + 1);
     }
 
-    // TODO: deal with scroll at some point
+    /* TODO: Deal with scroll at some point.
+        - if scroll = 0, let it stay zero
+        - otherwise try to keep the top line as the top line */
     // (until then, just make sure scroll is always valid)
     term.scroll = 0;
 
-    // TODO: deal with cursor at some point
+    /* Discard lines in the buffer that are so low that the cursor would have
+       to move downwards.
+
+       In practice, this should never discard useful information, because
+       either the cursor is in an early row and the terminal is either mostly
+       empty or some full-window application is responsible for repainting the
+       screen after the resize anyway.
+
+       So suppose we're on the 0th row of a 40-row terminal, and we resize to
+       a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines. */
+    if(term.row - abs2term(term.c.y) > row){
+        size_t n_extras = term.row - abs2term(term.c.y) - row;
+        for(size_t i = 0; i < n_extras; i++){
+            RLine *rline = get_rline(rlines_len() - 1);
+            rline_free(&rline);
+            term.rlines_end = rlines_idx(rlines_len() - 1);
+        }
+        // the absolute position of the cursor hasn't changed, so this is fine
+        // term.c.y = term.c.y
+    }
+
+    // reset CURSOR_WRAPNEXT if the screen got wider
+    if(col > term.col){
+        term.c.state &= ~CURSOR_WRAPNEXT;
+    // set CURSOR_WRAPNEXT if the screen got narrower than what is there
+    }else if(col < term.col && term.c.x < col){
+        term.c.state |= CURSOR_WRAPNEXT;
+        term.c.x = term.col;
+    }
 
     // TODO: deal with altscreen
 
@@ -2586,9 +2652,6 @@ tresize(int col, int row)
     /* update terminal size */
     term.col = col;
     term.row = row;
-
-    /* make use of the LIMIT in tmoveto */
-    tmoveto(term.c.x, term.c.y);
 }
 
 void
@@ -2816,11 +2879,9 @@ void trender(
         }
     }
 
-    size_t start_index = window_start();
-    size_t last_index = start_index + term.row;;
-    for(size_t i = 0; i + start_index < last_index; i++){
+    for(size_t i = 0; i < term.row; i++){
         // get the line at this index
-        RLine *rline = get_rline(i + start_index);
+        RLine *rline = get_rline(view2abs(i));
         // render this line
         rline_render(rline);
         // draw this line onto the cairo surface

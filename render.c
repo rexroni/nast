@@ -5,11 +5,32 @@
 #include "nast.h"
 #include "writable.h"
 
+#include "keymap.h"
+
 static gboolean tty_io(GIOChannel *src, GIOCondition cond, gpointer user_data);
 
-void die_on_ttywrite(const char *buf, size_t len){
-    (void)buf; (void)len;
+typedef struct {
+    // hooks pointer, must be the first element
+    THooks hooks;
+    // state
+    bool appcursor;
+    bool appkeypad;
+} render_thooks_t;
+
+static void die_on_ttywrite(THooks *thooks, const char *buf, size_t len){
+    (void)thooks; (void)buf; (void)len;
     die("we don't support tty writes from the terminal yet\n");
+}
+
+static void set_appcursor(THooks *thooks, bool val){
+    render_thooks_t *rhks = (render_thooks_t*)thooks;
+    rhks->appcursor = val;
+}
+
+static void set_appkeypad(THooks *thooks, bool val){
+    die("noappkeypad");
+    render_thooks_t *rhks = (render_thooks_t*)thooks;
+    rhks->appkeypad = val;
 }
 
 #define MODE_ECHO 1 << 0;
@@ -26,6 +47,7 @@ typedef struct {
     GtkWidget *window;
     GtkWidget *darea;
     GIOChannel *wr_ttychan;
+    render_thooks_t rhks;
 } globals_t;
 
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
@@ -135,28 +157,98 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
         gpointer user_data){
     globals_t *g = user_data;
 
+    // some things will wrongly be captured by the im_context, like keypad
+
     if(gtk_im_context_filter_keypress(g->im_ctx, event_key)){
         return TRUE;
     }
 
+    // ignore modifier keys themselves, let GTK track their state
+    if(event_key->is_modifier) return TRUE;
+
+    bool ctrl = event_key->state & GDK_CONTROL_MASK;
+    bool shift = event_key->state & GDK_SHIFT_MASK;
+
+    printf("keyval = 0x%x (%d)\n", event_key->keyval, event_key->keyval);
+    if(ctrl && event_key->keyval < 128){
+        key_action_t *key_action = keymap[event_key->keyval][shift];
+        // is there a keyaction defined for this key and modifier combination?
+        if(key_action){
+            if(key_action->key){
+                // simple key input
+                ttywrite(g, key_action->key, 1, 0);
+            }else{
+                // key action callback
+                die("keyaction callback not yet supported\n");
+            }
+            return TRUE;
+        }
+    }
+
+
     if(event_key->type == GDK_KEY_PRESS){
         switch(event_key->keyval){
+            // see gtk-3.0/gdk/gdkkeysyms.h
             case GDK_KEY_BackSpace:
                 // printf("bs\n");
-                ttywrite(g, "\b", 1, 0);
+                if(ctrl){
+                    ttywrite(g, "\x17", 1, 0);
+                }else{
+                    ttywrite(g, "\x7f", 1, 0);
+                }
                 // twrite("\b", 1, 0);
                 gtk_widget_queue_draw(g->darea);
-                break;
+                return TRUE;
+
             case GDK_KEY_Return:
                 // printf("return\n");
                 ttywrite(g, "\n", 1, 0);
                 // twrite("\n", 1, 0);
                 gtk_widget_queue_draw(g->darea);
-                break;
-            default: printf("unhandled key! (%c)\n", event_key->keyval); return FALSE;
+                return TRUE;
+
+            // arrow keys
+            case GDK_KEY_Up:
+                ttywrite(g, g->rhks.appcursor ? "\x1b[A" : "\x1bOA", 3, 0);
+                return TRUE;
+            case GDK_KEY_Down:
+                ttywrite(g, g->rhks.appcursor ? "\x1b[B" : "\x1bOB", 3, 0);
+                return TRUE;
+            case GDK_KEY_Right:
+                ttywrite(g, g->rhks.appcursor ? "\x1b[C" : "\x1bOC", 3, 0);
+                return TRUE;
+            case GDK_KEY_Left:
+                ttywrite(g, g->rhks.appcursor ? "\x1b[D" : "\x1bOD", 3, 0);
+                return TRUE;
+
+            // keypad (gets intercepted by the im_context... grr)
+            case GDK_KEY_KP_0:
+                return TRUE;
+            case GDK_KEY_KP_1:
+                return TRUE;
+            case GDK_KEY_KP_2:
+                return TRUE;
+            case GDK_KEY_KP_3:
+                return TRUE;
+            case GDK_KEY_KP_4:
+                return TRUE;
+            case GDK_KEY_KP_5:
+                return TRUE;
+            case GDK_KEY_KP_6:
+                return TRUE;
+            case GDK_KEY_KP_7:
+                return TRUE;
+            case GDK_KEY_KP_8:
+                return TRUE;
+            case GDK_KEY_KP_9:
+                return TRUE;
+
+
+            default:
+                printf("unhandled key! (%c)\n", event_key->keyval); return FALSE;
         }
     }
-    return TRUE;
+    return FALSE;
 }
 
 static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
@@ -303,7 +395,15 @@ void prep_channel(GIOChannel *chan){
 }
 
 int main(int argc, char *argv[]){
-    globals_t g = {0};
+    globals_t g = {
+        .rhks = {
+            .hooks = {
+                .ttywrite = die_on_ttywrite,
+                .set_appcursor = set_appcursor,
+                .set_appkeypad = set_appkeypad,
+            },
+        },
+    };
 
     gtk_init(&argc, &argv);
 
@@ -341,7 +441,7 @@ int main(int argc, char *argv[]){
     gtk_widget_show_all(g.window);
 
     // create the terminal
-    tnew(80, 40, "monospace 10", die_on_ttywrite);
+    tnew(80, 40, "monospace 10", (THooks*)&g.rhks);
 
     // g.ttyfd = ttynew(NULL, "/bin/sh", NULL, (char*[]){"cat", NULL});
     g.ttyfd = ttynew(NULL, "/bin/sh", NULL, NULL);

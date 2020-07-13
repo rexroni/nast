@@ -103,6 +103,16 @@ typedef struct {
     size_t end_id;
 } TLine;
 
+struct THooks;
+typedef struct THooks THooks;
+
+struct THooks {
+    // for writing to TTY for certain control codes
+    void (*ttywrite)(THooks*, const char *, size_t);
+    void (*set_appcursor)(THooks*, bool);
+    void (*set_appkeypad)(THooks*, bool);
+};
+
 typedef union {
     int i;
     uint ui;
@@ -121,14 +131,13 @@ void sendbreak(const Arg *);
 void toggleprinter(const Arg *);
 
 int tattrset(int);
-void tnew(int col, int row, char *font_name, void (*ttywrite)(const char *, size_t));
+void tnew(int col, int row, char *font_name, THooks *hooks);
 void tresize(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
 int ttynew(char *, char *, char *, char **);
 size_t ttyread(void);
 void ttyresize(int, int);
-void die_on_ttywrite(const char *buf, size_t len);
 
 void resettitle(void);
 
