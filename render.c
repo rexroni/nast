@@ -28,7 +28,6 @@ static void set_appcursor(THooks *thooks, bool val){
 }
 
 static void set_appkeypad(THooks *thooks, bool val){
-    die("noappkeypad");
     render_thooks_t *rhks = (render_thooks_t*)thooks;
     rhks->appkeypad = val;
 }
@@ -158,6 +157,69 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     globals_t *g = user_data;
 
     // some things will wrongly be captured by the im_context, like keypad
+    if(event_key->type == GDK_KEY_PRESS){
+        bool x = g->rhks.appkeypad;
+        switch(event_key->keyval){
+            // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-8
+            case GDK_KEY_KP_0:
+                ttywrite(g, x ? "\x1bOp" : "0", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_1:
+                ttywrite(g, x ? "\x1bOq" : "1", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_2:
+                ttywrite(g, x ? "\x1bOr" : "2", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_3:
+                ttywrite(g, x ? "\x1bOs" : "3", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_4:
+                ttywrite(g, x ? "\x1bOt" : "4", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_5:
+                ttywrite(g, x ? "\x1bOu" : "5", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_6:
+                ttywrite(g, x ? "\x1bOv" : "6", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_7:
+                ttywrite(g, x ? "\x1bOw" : "7", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_8:
+                ttywrite(g, x ? "\x1bOx" : "8", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_9:
+                ttywrite(g, x ? "\x1bOy" : "9", x ? 3 : 1, 0);
+                return TRUE;
+
+            // GDK_KEY_KP_Separator seems to never appear.
+            // (KEY_KPCOMMA is coming through GTK as GDK_KEY_KP_Decimal...?)
+            // Probably this is fine since modern numpads have no comma.
+            case GDK_KEY_KP_Separator:
+                ttywrite(g, x ? "\x1bOl" : ",", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_Subtract:
+                ttywrite(g, x ? "\x1bOm" : "-", x ? 3 : 1, 0);
+                return TRUE;
+            case GDK_KEY_KP_Decimal:
+                ttywrite(g, x ? "\x1bOn" : ".", x ? 3 : 1, 0);
+                return TRUE;
+
+            // return key is handled later for non-appkey mode
+            case GDK_KEY_KP_Enter:
+                if(x){
+                    ttywrite(g, "\x1bOM", 3, 0);
+                    return TRUE;
+                }
+                break;
+
+
+            // apparently none of [*+/] are special
+            // case GDK_KEY_KP_Multiply:
+            // case GDK_KEY_KP_Add:
+            // case GDK_KEY_KP_Divide:
+        }
+    }
 
     if(gtk_im_context_filter_keypress(g->im_ctx, event_key)){
         return TRUE;
@@ -169,7 +231,6 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     bool ctrl = event_key->state & GDK_CONTROL_MASK;
     bool shift = event_key->state & GDK_SHIFT_MASK;
 
-    printf("keyval = 0x%x (%d)\n", event_key->keyval, event_key->keyval);
     if(ctrl && event_key->keyval < 128){
         key_action_t *key_action = keymap[event_key->keyval][shift];
         // is there a keyaction defined for this key and modifier combination?
@@ -200,6 +261,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 gtk_widget_queue_draw(g->darea);
                 return TRUE;
 
+            case GDK_KEY_KP_Enter:  // not appkey mode
             case GDK_KEY_Return:
                 // printf("return\n");
                 ttywrite(g, "\n", 1, 0);
@@ -208,6 +270,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 return TRUE;
 
             // arrow keys
+            // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-6
             case GDK_KEY_Up:
                 ttywrite(g, g->rhks.appcursor ? "\x1b[A" : "\x1bOA", 3, 0);
                 return TRUE;
@@ -220,29 +283,6 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
             case GDK_KEY_Left:
                 ttywrite(g, g->rhks.appcursor ? "\x1b[D" : "\x1bOD", 3, 0);
                 return TRUE;
-
-            // keypad (gets intercepted by the im_context... grr)
-            case GDK_KEY_KP_0:
-                return TRUE;
-            case GDK_KEY_KP_1:
-                return TRUE;
-            case GDK_KEY_KP_2:
-                return TRUE;
-            case GDK_KEY_KP_3:
-                return TRUE;
-            case GDK_KEY_KP_4:
-                return TRUE;
-            case GDK_KEY_KP_5:
-                return TRUE;
-            case GDK_KEY_KP_6:
-                return TRUE;
-            case GDK_KEY_KP_7:
-                return TRUE;
-            case GDK_KEY_KP_8:
-                return TRUE;
-            case GDK_KEY_KP_9:
-                return TRUE;
-
 
             default:
                 printf("unhandled key! (%c)\n", event_key->keyval); return FALSE;
