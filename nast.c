@@ -1317,11 +1317,6 @@ tclearregion_abs(int x1, int y1, int x2, int y2)
     if (y1 > y2)
         temp = y1, y1 = y2, y2 = temp;
 
-    LIMIT(x1, 0, term.col-1);
-    LIMIT(x2, 0, term.col-1);
-    LIMIT(y1, 0, term.row-1);
-    LIMIT(y2, 0, term.row-1);
-
     for (y = y1; y <= y2; y++) {
         RLine *rline = get_rline(y);
         rline_unrender(rline);
@@ -1341,6 +1336,11 @@ tclearregion_abs(int x1, int y1, int x2, int y2)
 void
 tclearregion_term(int x1, int y1, int x2, int y2)
 {
+    LIMIT(x1, 0, term.col-1);
+    LIMIT(x2, 0, term.col-1);
+    LIMIT(y1, 0, term.row-1);
+    LIMIT(y2, 0, term.row-1);
+
     tclearregion_abs(x1, term2abs(y1), x2, term2abs(y2));
 }
 
@@ -1773,25 +1773,23 @@ csihandle(void)
             tclearregion_term(
                 term.c.x, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
             );
-            if (term.c.y < term.row-1) {
+            if (abs2term(term.c.y) < term.row-1) {
                 tclearregion_term(
                     0, abs2term(term.c.y+1), term.col-1, abs2term(term.row-1)
                 );
             }
             break;
         case 1: /* above */
-            if (term.c.y > 1)
+            if (abs2term(term.c.y) > 1)
                 tclearregion_term(
-                    0, abs2term(0), term.col-1, abs2term(term.c.y-1)
+                    0, 0, term.col-1, abs2term(term.c.y-1)
                 );
             tclearregion_term(
                 0, abs2term(term.c.y), term.c.x, abs2term(term.c.y)
             );
             break;
         case 2: /* all */
-            tclearregion_term(
-                0, abs2term(0), term.col-1, abs2term(term.row-1)
-            );
+            tclearregion_term(0, 0, term.col-1, term.row-1);
             break;
         default:
             goto unknown;

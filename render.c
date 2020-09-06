@@ -251,21 +251,13 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
         switch(event_key->keyval){
             // see gtk-3.0/gdk/gdkkeysyms.h
             case GDK_KEY_BackSpace:
-                // printf("bs\n");
-                if(ctrl){
-                    ttywrite(g, "\x17", 1, 0);
-                }else{
-                    ttywrite(g, "\x7f", 1, 0);
-                }
-                // twrite("\b", 1, 0);
+                ttywrite(g, ctrl ? "\x17" : "\x7f", 1, 0);
                 gtk_widget_queue_draw(g->darea);
                 return TRUE;
 
             case GDK_KEY_KP_Enter:  // not appkey mode
             case GDK_KEY_Return:
-                // printf("return\n");
                 ttywrite(g, "\n", 1, 0);
-                // twrite("\n", 1, 0);
                 gtk_widget_queue_draw(g->darea);
                 return TRUE;
 
@@ -283,11 +275,11 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
             case GDK_KEY_Left:
                 ttywrite(g, g->rhks.appcursor ? "\x1b[D" : "\x1bOD", 3, 0);
                 return TRUE;
-
-            default:
-                printf("unhandled key! (%c)\n", event_key->keyval); return FALSE;
         }
+
+        printf("unhandled keypress! (%c)\n", event_key->keyval);
     }
+
     return FALSE;
 }
 
