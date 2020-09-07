@@ -91,7 +91,7 @@ typedef struct {
     Glyph attr; /* current char attributes */
     // position in line
     int x;
-    // y position, relative to start of ring buffer
+    // y cursor position, relative to the view.
     int y;
     char state;
 } TCursor;
@@ -1202,19 +1202,18 @@ selscroll(int orig, int n)
 void
 tnewline(int first_col)
 {
-    // move the cursor down a line;
+    // move the cursor down a line
     term.c.y++;
 
     // do we need a new line?
-    if(term.c.y == rlines_len()){
+    if(term.c.y == term.row){
+        term.c.y--;
         // is ring buffer full?
         if(rlines_len() == term.rlines_cap){
             // free oldest rline
             rline_free(&term.rlines[term.rlines_start]);
             // forget the oldest history element (start of the ring buffer)
             term.rlines_start = rlines_idx(term.rlines_start + 1);
-            // cursor position is relative to start of ring buffer
-            term.c.y--;
             // TODO: deal with tlines
         }
 
@@ -1262,18 +1261,20 @@ csiparse(void)
     csiescseq.mode[1] = (p < csiescseq.buf+csiescseq.len) ? *p : '\0';
 }
 
+// uses terminal coordinates
 void
 tmoveto(int x, int y)
 {
-    // tmoveto() always acts as if term.scroll==0
     term.c.state &= ~CURSOR_WRAPNEXT;
     term.c.x = LIMIT(x, 0, term.col-1);
-    term.c.y = LIMIT(y, rlines_len() - term.row, rlines_len() - 1);
+    term.c.y = LIMIT(y, 0, term.row-1);
 }
 
+// uses terminal coordinates
 void
 tsetchar(Rune u, Glyph *attr, int x, int y)
 {
+    die("update tsetchar");
     static char *vt100_0[62] = { /* 0x41 - 0x7e */
         "↑", "↓", "→", "←", "█", "▚", "☃", /* A - G */
         0, 0, 0, 0, 0, 0, 0, 0, /* H - O */
@@ -1354,13 +1355,11 @@ tdeletechar(int n)
     dst = term.c.x;
     src = term.c.x + n;
     size = term.col - src;
-    RLine *rline = get_rline(term.c.y);
+    RLine *rline = get_rline(term2abs(term.c.y));
 
     Glyph *glyphs = rline->glyphs;
     memmove(&glyphs[dst], &glyphs[src], size * sizeof(*glyphs));
-    tclearregion_term(
-        term.col-n, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
-    );
+    tclearregion_term(term.col-n, term.c.y, term.col-1, term.c.y);
 }
 
 void
@@ -1374,12 +1373,11 @@ tinsertblank(int n)
     dst = term.c.x + n;
     src = term.c.x;
     size = term.col - dst;
+    die("update tinsertblank");
     line = term.line[term.c.y];
 
     memmove(&line[dst], &line[src], size * sizeof(Glyph));
-    tclearregion_term(
-        src, abs2term(term.c.y), dst - 1, abs2term(term.c.y)
-    );
+    tclearregion_term(src, term.c.y, dst - 1, term.c.y);
 }
 
 void
@@ -1770,23 +1768,16 @@ csihandle(void)
     case 'J': /* ED -- Clear screen */
         switch (csiescseq.arg[0]) {
         case 0: /* below */
-            tclearregion_term(
-                term.c.x, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
-            );
-            if (abs2term(term.c.y) < term.row-1) {
-                tclearregion_term(
-                    0, abs2term(term.c.y+1), term.col-1, abs2term(term.row-1)
-                );
+            tclearregion_term(term.c.x, term.c.y, term.col-1, term.c.y);
+            if (term.c.y < term.row-1) {
+                tclearregion_term(0, term.c.y+1, term.col-1, term.row-1);
             }
             break;
         case 1: /* above */
-            if (abs2term(term.c.y) > 1)
-                tclearregion_term(
-                    0, 0, term.col-1, abs2term(term.c.y-1)
-                );
-            tclearregion_term(
-                0, abs2term(term.c.y), term.c.x, abs2term(term.c.y)
-            );
+            if (term.c.y > 1){
+                tclearregion_term(0, 0, term.col-1, term.c.y-1);
+            }
+            tclearregion_term(0, term.c.y, term.c.x, term.c.y);
             break;
         case 2: /* all */
             tclearregion_term(0, 0, term.col-1, term.row-1);
@@ -1798,19 +1789,13 @@ csihandle(void)
     case 'K': /* EL -- Clear line */
         switch (csiescseq.arg[0]) {
         case 0: /* right */
-            tclearregion_term(
-                term.c.x, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
-            );
+            tclearregion_term(term.c.x, term.c.y, term.col-1, term.c.y);
             break;
         case 1: /* left */
-            tclearregion_term(
-                0, abs2term(term.c.y), term.c.x, abs2term(term.c.y)
-            );
+            tclearregion_term(0, term.c.y, term.c.x, term.c.y);
             break;
         case 2: /* all */
-            tclearregion_term(
-                0, abs2term(term.c.y), term.col-1, abs2term(term.c.y)
-            );
+            tclearregion_term(0, term.c.y, term.col-1, term.c.y);
             break;
         }
         break;
@@ -1836,10 +1821,7 @@ csihandle(void)
     case 'X': /* ECH -- Erase <n> char */
         DEFAULT(csiescseq.arg[0], 1);
         tclearregion_term(
-            term.c.x,
-            abs2term(term.c.y),
-            term.c.x + csiescseq.arg[0] - 1,
-            abs2term(term.c.y)
+            term.c.x, term.c.y, term.c.x + csiescseq.arg[0] - 1, term.c.y
         );
         break;
     case 'P': /* DCH -- Delete <n> char */
@@ -2503,12 +2485,12 @@ check_control_code:
     Glyph g = term.c.attr;
     g.u = u;
 
-    RLine *rline = get_rline(term.c.y);
+    RLine *rline = get_rline(term2abs(term.c.y));
 
     if(term.c.state & CURSOR_WRAPNEXT){
         rline->glyphs[term.c.x].mode |= ATTR_WRAP;
         tnewline(1);
-        rline = get_rline(term.c.y);
+        rline = get_rline(term2abs(term.c.y));
     }
 
     // TODO: handle double-width characters
@@ -2608,8 +2590,8 @@ tresize(int col, int row)
 
        So suppose we're on the 0th row of a 40-row terminal, and we resize to
        a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines. */
-    if(term.row - abs2term(term.c.y) > row){
-        size_t n_extras = term.row - abs2term(term.c.y) - row;
+    if(term.row - term.c.y > row){
+        size_t n_extras = term.row - term.c.y - row;
         for(size_t i = 0; i < n_extras; i++){
             RLine *rline = get_rline(rlines_len() - 1);
             rline_free(&rline);
@@ -2674,6 +2656,7 @@ drawregion(int x1, int y1, int x2, int y2)
 void
 draw(void)
 {
+    die("delete draw()");
     int cx = term.c.x;
 
     if (!xstartdraw())
