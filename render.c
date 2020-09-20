@@ -228,6 +228,9 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     // ignore modifier keys themselves, let GTK track their state
     if(event_key->is_modifier) return TRUE;
 
+    // ignore releases
+    if(event_key->type != GDK_KEY_PRESS) return TRUE;
+
     bool ctrl = event_key->state & GDK_CONTROL_MASK;
     bool shift = event_key->state & GDK_SHIFT_MASK;
 
