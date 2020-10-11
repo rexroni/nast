@@ -763,31 +763,6 @@ xloadcolor(int i, const char *name, Color *ncolor)
     return XftColorAllocName(xw.dpy, xw.vis, xw.cmap, name, ncolor);
 }
 
-void
-xloadcols(void)
-{
-    int i;
-    static int loaded;
-    Color *cp;
-
-    if (loaded) {
-        for (cp = dc.col; cp < &dc.col[dc.collen]; ++cp)
-            XftColorFree(xw.dpy, xw.vis, xw.cmap, cp);
-    } else {
-        dc.collen = MAX(LEN(colorname), 256);
-        dc.col = xmalloc(dc.collen * sizeof(Color));
-    }
-
-    for (i = 0; i < dc.collen; i++)
-        if (!xloadcolor(i, NULL, &dc.col[i])) {
-            if (colorname[i])
-                die("could not allocate color '%s'\n", colorname[i]);
-            else
-                die("could not allocate color %d\n", i);
-        }
-    loaded = 1;
-}
-
 int
 xsetcolorname(int x, const char *name)
 {
@@ -1674,16 +1649,6 @@ xsetpointermotion(int set)
     XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
 }
 
-void
-xsetmode(int set, unsigned int flags)
-{
-    die("xsetmode not implemented\n");
-//     int mode = win.mode;
-//     MODBIT(win.mode, set, flags);
-//     if ((win.mode & MODE_REVERSE) != (mode & MODE_REVERSE))
-//         redraw();
-}
-
 int
 xsetcursor(int cursor)
 {
@@ -1702,15 +1667,6 @@ xseturgency(int add)
     MODBIT(h->flags, add, XUrgencyHint);
     XSetWMHints(xw.dpy, xw.win, h);
     XFree(h);
-}
-
-void
-xbell(void)
-{
-    if (!(IS_SET(MODE_FOCUSED)))
-        xseturgency(1);
-    if (bellvolume)
-        XkbBell(xw.dpy, xw.win, bellvolume, (Atom)NULL);
 }
 
 void

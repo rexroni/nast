@@ -22,14 +22,45 @@ static void die_on_ttywrite(THooks *thooks, const char *buf, size_t len){
     die("we don't support tty writes from the terminal yet\n");
 }
 
-static void set_appcursor(THooks *thooks, bool val){
+static void set_mode(THooks *thooks, enum win_mode mode, int val){
     render_thooks_t *rhks = (render_thooks_t*)thooks;
-    rhks->appcursor = val;
+
+    if(mode & MODE_APPCURSOR){
+        rhks->appcursor = (bool)val;
+    }
+
+    if(mode & MODE_APPKEYPAD){
+        rhks->appkeypad = (bool)val;
+    }
+
+    if(mode & MODE_VISIBLE) die("VISIBLE mode not handled\n");
+    if(mode & MODE_FOCUSED) die("FOCUSED mode not handled\n");
+    if(mode & MODE_MOUSEBTN) die("MOUSEBTN mode not handled\n");
+    if(mode & MODE_MOUSEMOTION) die("MOUSEMOTION mode not handled\n");
+    if(mode & MODE_REVERSE) die("REVERSE mode not handled\n");
+    if(mode & MODE_KBDLOCK) die("KBDLOCK mode not handled\n");
+    if(mode & MODE_HIDE) die("HIDE mode not handled\n");
+    if(mode & MODE_MOUSESGR) die("MOUSESGR mode not handled\n");
+    if(mode & MODE_8BIT) die("8BIT mode not handled\n");
+    if(mode & MODE_BLINK) die("BLINK mode not handled\n");
+    if(mode & MODE_FBLINK) die("FBLINK mode not handled\n");
+    if(mode & MODE_FOCUS) die("FOCUS mode not handled\n");
+    if(mode & MODE_MOUSEX10) die("MOUSEX10 mode not handled\n");
+    if(mode & MODE_MOUSEMANY) die("MOUSEMANY mode not handled\n");
+    if(mode & MODE_BRCKTPASTE) die("BRCKTPASTE mode not handled\n");
+    if(mode & MODE_NUMLOCK) die("NUMLOCK mode not handled\n");
+
+    // this one is a conglomerate of other modes
+    if(mode & MODE_MOUSE) die("NUMLOCK mode not handled\n");
 }
 
-static void set_appkeypad(THooks *thooks, bool val){
-    render_thooks_t *rhks = (render_thooks_t*)thooks;
-    rhks->appkeypad = val;
+void set_title(THooks *thooks, const char *title){
+    (void)thooks;
+    (void)title;
+}
+
+void bell(THooks *thooks){
+    (void)thooks;
 }
 
 #define MODE_ECHO 1 << 0;
@@ -434,8 +465,9 @@ int main(int argc, char *argv[]){
         .rhks = {
             .hooks = {
                 .ttywrite = die_on_ttywrite,
-                .set_appcursor = set_appcursor,
-                .set_appkeypad = set_appkeypad,
+                .set_mode = set_mode,
+                .set_title = set_title,
+                .bell = bell,
             },
         },
     };
