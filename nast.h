@@ -67,6 +67,15 @@ enum win_mode {
                      | MODE_MOUSEMANY,
 };
 
+enum cursor_style {
+    CURSOR_BLOCK_BLINK = 1, // 0 or 1
+    CURSOR_BLOCK_SOLID,
+    CURSOR_UNDRLN_BLINK,
+    CURSOR_UNDRLN_SOLID,
+    CURSOR_BAR_BLINK,
+    CURSOR_BAR_SOLID,
+};
+
 enum selection_mode {
     SEL_IDLE = 0,
     SEL_EMPTY = 1,
@@ -134,9 +143,10 @@ typedef struct THooks THooks;
 struct THooks {
     // for writing to TTY for certain control codes
     void (*ttywrite)(THooks*, const char *, size_t);
+    void (*bell)(THooks*);
     void (*set_mode)(THooks*, enum win_mode, int);
     void (*set_title)(THooks*, const char *);
-    void (*bell)(THooks*);
+    void (*set_clipboard)(THooks*, char *buf, size_t len);
 };
 
 typedef union {

@@ -157,6 +157,7 @@ typedef struct {
     int charset;  /* current charset */
     int icharset; /* selected charset for sequence */
     int *tabs;
+    enum cursor_style cursor_style;
 } Term;
 
 /* CSI Escape sequence structs */
@@ -203,6 +204,7 @@ static void tdump(void);
 static void tclearregion_abs(int, int, int, int);
 static void tclearregion_term(int, int, int, int);
 static void tcursor(int);
+static int tcursorstyle(int);
 static void tdeletechar(int);
 static void tdeleteline(int);
 static void tinsertblank(int);
@@ -240,7 +242,7 @@ static Rune utf8decodebyte(char, size_t *);
 static char utf8encodebyte(Rune, size_t);
 static size_t utf8validate(Rune *, size_t);
 
-static char *base64dec(const char *);
+static char *base64dec(const char *, size_t *);
 static char base64dec_getc(const char **);
 
 static ssize_t xwrite(int, const char *, size_t);
@@ -433,7 +435,7 @@ base64dec_getc(const char **src)
 }
 
 char *
-base64dec(const char *src)
+base64dec(const char *src, size_t *len)
 {
     size_t in_len = strlen(src);
     char *result, *dst;
@@ -459,6 +461,7 @@ base64dec(const char *src)
             break;
         *dst++ = ((c & 0x03) << 6) | d;
     }
+    *len = (size_t)(dst - result);
     *dst = '\0';
     return result;
 }
@@ -979,6 +982,29 @@ tcursor(int mode)
         term.c = c[alt];
         tmoveto(c[alt].x, c[alt].y);
     }
+}
+
+int
+tcursorstyle(int style)
+{
+    // DECSCUSR: Set Cursor Style:
+    // https://vt100.net/docs/vt510-rm/DECSCUSR.html
+    switch(style){
+    case 0:
+    case 1:
+        term.cursor_style = CURSOR_BLOCK_BLINK;
+        break;
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+        term.cursor_style = style;
+        break;
+    default:
+        return -1;
+    }
+    return 0;
 }
 
 void
@@ -1578,22 +1604,22 @@ tsetmode(int priv, int set, int *args, int narg)
                 term.hooks->set_mode(term.hooks, MODE_HIDE, !set);
                 break;
             case 9:    /* X10 mouse compatibility mode */
-                xsetpointermotion(0);
+                // xsetpointermotion(0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSE, 0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSEX10, set);
                 break;
             case 1000: /* 1000: report button press */
-                xsetpointermotion(0);
+                // xsetpointermotion(0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSE, 0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSEBTN, set);
                 break;
             case 1002: /* 1002: report motion on button press */
-                xsetpointermotion(0);
+                // xsetpointermotion(0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSE, 0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSEMOTION, set);
                 break;
             case 1003: /* 1003: enable all mouse motions */
-                xsetpointermotion(set);
+                // xsetpointermotion(set);
                 term.hooks->set_mode(term.hooks, MODE_MOUSE, 0);
                 term.hooks->set_mode(term.hooks, MODE_MOUSEMANY, set);
                 break;
@@ -1868,8 +1894,9 @@ csihandle(void)
         break;
     case ' ':
         switch (csiescseq.mode[1]) {
-        case 'q': /* DECSCUSR -- Set Cursor Style */
-            if (xsetcursor(csiescseq.arg[0]))
+        case 'q':
+            // DECSCUSR: Set Cursor Style:
+            if(tcursorstyle(csiescseq.arg[0]))
                 goto unknown;
             break;
         default:
@@ -1912,7 +1939,7 @@ csireset(void)
 void
 strhandle(void)
 {
-    char *p = NULL, *dec;
+    char *p = NULL, *buf;
     int j, narg, par;
 
     term.esc &= ~(ESC_STR_END|ESC_STR);
@@ -1930,37 +1957,39 @@ strhandle(void)
             return;
         case 52:
             if (narg > 2) {
-                dec = base64dec(strescseq.args[2]);
-                if (dec) {
-                    xsetsel(dec);
-                    xclipcopy();
+                size_t len;
+                buf = base64dec(strescseq.args[2], &len);
+                if (buf) {
+                    term.hooks->set_clipboard(term.hooks, buf, len);
                 } else {
                     fprintf(stderr, "erresc: invalid base64\n");
                 }
             }
             return;
-        case 4: /* color set */
-            if (narg < 3)
-                break;
-            p = strescseq.args[2];
-            /* FALLTHROUGH */
-        case 104: /* color reset, here p = NULL */
-            j = (narg > 1) ? atoi(strescseq.args[1]) : -1;
-            if (xsetcolorname(j, p)) {
-                if (par == 104 && narg <= 1)
-                    return; /* color reset without parameter */
-                fprintf(stderr, "erresc: invalid color j=%d, p=%s\n",
-                        j, p ? p : "(null)");
-            } else {
-                /*
-                 * TODO if defaultbg color is changed, borders
-                 * are dirty
-                 */
-                redraw();
-            }
-            return;
         }
-        break;
+//// TODO: support custom colors eventually.
+//         case 4: /* color set */
+//             if (narg < 3)
+//                 break;
+//             p = strescseq.args[2];
+//             /* FALLTHROUGH */
+//         case 104: /* color reset, here p = NULL */
+//             j = (narg > 1) ? atoi(strescseq.args[1]) : -1;
+//             if (xsetcolorname(j, p)) {
+//                 if (par == 104 && narg <= 1)
+//                     return; /* color reset without parameter */
+//                 fprintf(stderr, "erresc: invalid color j=%d, p=%s\n",
+//                         j, p ? p : "(null)");
+//             } else {
+//                 /*
+//                  * TODO if defaultbg color is changed, borders
+//                  * are dirty
+//                  */
+//                 redraw();
+//             }
+//             return;
+//         }
+//         break;
     case 'k': /* old title set compatibility */
         term.hooks->set_title(term.hooks, strescseq.args[0]);
         return;

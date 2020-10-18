@@ -1642,22 +1642,13 @@ unmap(XEvent *ev)
     win.mode &= ~MODE_VISIBLE;
 }
 
-void
-xsetpointermotion(int set)
-{
-    MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
-    XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
-}
-
-int
-xsetcursor(int cursor)
-{
-    DEFAULT(cursor, 1);
-    if (!BETWEEN(cursor, 0, 6))
-        return 1;
-    win.cursor = cursor;
-    return 0;
-}
+//// This is only to enable pointer motion events in X.  We'll just always have them in render.c.
+// void
+// xsetpointermotion(int set)
+// {
+//     MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
+//     XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
+// }
 
 void
 xseturgency(int add)

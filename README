@@ -1,34 +1,83 @@
-st - simple terminal
+nast - not-as-simple terminal
 --------------------
-st is a simple terminal emulator for X which sucks less.
+nast is a fork of the suckless simple terminal.  libnast is a library designed
+to provide terminal emulator behavior to arbitrary applications with a
+well-defined interface.
+
+Project Status
+--------------
+nast and libnast are currently in early development
+
+System Architecture
+-------------------
+              _____________
+             |             |
+             | application |
+             |_____________|
+                  v   ^
+               A. v   ^          nast terminal emulator
+           .......v...^.........................
+           .  ____v___^____       ___________  .
+           . |             | C.  |           | .
+           . |   backend   |< < <|   Term    | .
+           . |  (GTK app)  |> > >| (libnast) | .
+           . |_____________|     |___________| .
+           .      v   ^                        .
+           .......v...^.........................
+               B. v   ^
+             _____v___^______
+            |                |
+            | window manager |
+            |________________|
 
 
-Requirements
-------------
-In order to build st you need the Xlib header files.
+    A: application/backend interface:
+        - A tty.  That's it.
+        - application reads keys from the tty device
+        - application writes keys out to the tty device
+        - application may try to configure the terminal with escape codes
+          (by writing the escape codes to the tty)
 
+    B: window manager / backend interface:
+        - the backend implements the communication with the window manager
+        - GTK abstracts the window manager, so we just deal with GTK anyway
+        - inputs to the backend are GTK key and mouse events
+        - we filter inputs throught the GTK Input Method
+        - outputs are that we tell GTK what to draw and when to redraw it
 
-Installation
-------------
-Edit config.mk to match your local setup (st is installed into
-the /usr/local namespace by default).
+    C: backend / libnast interface
+        - libnast implements the terminal emulation logic
+        - the backend provides the canvas on which libnast draws the characters
+        - the backend provides a set of THooks for things that must be passed
+          to the desktop environment such as:
+            - the terminal bell
+            - the window title
+            - altering the clipboard
+          and for things that must be passed to the application, such as:
+            - giving bytes that should be written directly to the application
+            - enabling and disabling the passing of mouse inputs
+            - enabling appcursor and appkeypad mode, which change how certain
+              key inputs are encoded over the application/backend interface
 
-Afterwards enter the following command to build and install st (if
-necessary as root):
+    Example sequence: pressing the 'q' key:
+        - window manager tells backend shift+2 is hit (via B.)
+        - backend tells the application by writing a 'q' to the tty (via A.)
+        - application writes 'q' key back to its stdout (via A.)
+        - backend reads 'q' on tty, passes it to libnast (via C.)
+        - libnast updates the terminal state, updates canvas
+        - libnast tells backend canvas is updated
+        - backend notifies window manager to redraw
 
-    make clean install
-
-
-Running st
-----------
-If you did not install st with make clean install, you must compile
-the st terminfo entry with the following command:
-
-    tic -sx st.info
-
-See the man page for additional details.
+    Example sequence: Application calls the Device Status Report
+        - application writes '\x1b[6n' to its stdout (the tty)
+        - backend reads the bytes, passes them to libnast
+        - libnast interprets the DSR request, generates response bytes
+        - libnast calls the THook to tell the backend to write response to tty
+        - backend writes the response bytes to the tty
+        - application reads the response on its stdin (the tty)
 
 Credits
 -------
-Based on Aurélien APTEL <aurelien dot aptel at gmail dot com> bt source code.
 
+Based on the work of literally more people than I can track.  See LICENSE for
+a subset of such people.

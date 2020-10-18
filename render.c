@@ -22,6 +22,10 @@ static void die_on_ttywrite(THooks *thooks, const char *buf, size_t len){
     die("we don't support tty writes from the terminal yet\n");
 }
 
+void bell(THooks *thooks){
+    (void)thooks;
+}
+
 static void set_mode(THooks *thooks, enum win_mode mode, int val){
     render_thooks_t *rhks = (render_thooks_t*)thooks;
 
@@ -57,11 +61,16 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
 void set_title(THooks *thooks, const char *title){
     (void)thooks;
     (void)title;
+    die("set_title() not handled\n");
 }
 
-void bell(THooks *thooks){
+void set_clipboard(THooks *thooks, char *buf, size_t len){
     (void)thooks;
+    free(buf);
+    (void)len;
+    die("set_clipboard() not handled\n");
 }
+
 
 #define MODE_ECHO 1 << 0;
 #define MODE_CLRF 1 << 1;
@@ -465,9 +474,10 @@ int main(int argc, char *argv[]){
         .rhks = {
             .hooks = {
                 .ttywrite = die_on_ttywrite,
+                .bell = bell,
                 .set_mode = set_mode,
                 .set_title = set_title,
-                .bell = bell,
+                .set_clipboard = set_clipboard,
             },
         },
     };
