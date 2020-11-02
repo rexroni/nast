@@ -63,7 +63,7 @@ enum cursor_movement {
 enum cursor_state {
     CURSOR_DEFAULT  = 0,
     CURSOR_WRAPNEXT = 1,
-    // CURSOR_ORIGIN   = 2
+    CURSOR_ORIGIN   = 2,
 };
 
 enum charset {
@@ -1296,6 +1296,13 @@ tmoveto(int x, int y)
     term.c.y = LIMIT(y, 0, term.row-1);
 }
 
+// uses terminal coordinates, modded by the scroll region in origin mode
+void
+tmoveto_origin(int x, int y)
+{
+    tmoveto(x, y + ((term.c.state & CURSOR_ORIGIN) ? term.top: 0));
+}
+
 // uses terminal coordinates
 void
 tsetchar(Rune u, Glyph *attr, int x, int y)
@@ -1569,6 +1576,21 @@ tsetattr(int *attr, int l)
 }
 
 void
+tscrollregion(int t, int b)
+{
+    int temp;
+    LIMIT(t, 0, term.row-1);
+    LIMIT(b, 0, term.row-1);
+    if(t > b){
+        temp = t;
+        t = b;
+        b = temp;
+    }
+    term.top = t;
+    term.bot = t;
+}
+
+void
 tsetmode(int priv, int set, int *args, int narg)
 {
     int alt, *lim;
@@ -1583,9 +1605,8 @@ tsetmode(int priv, int set, int *args, int narg)
                 term.hooks->set_mode(term.hooks, MODE_REVERSE, set);
                 break;
             case 6: /* DECOM -- Origin */
-                die("DECOM not supported\n");
-                // MODBIT(term.c.state, set, CURSOR_ORIGIN);
-                // tmoveato(0, 0);
+                MODBIT(term.c.state, set, CURSOR_ORIGIN);
+                tmoveto_origin(0, 0);
                 break;
             case 7: /* DECAWM -- Auto wrap */
                 MODBIT(term.mode, set, MODE_WRAP);
@@ -1785,7 +1806,7 @@ csihandle(void)
     case 'f': /* HVP */
         DEFAULT(csiescseq.arg[0], 1);
         DEFAULT(csiescseq.arg[1], 1);
-        tmoveto(csiescseq.arg[1]-1, csiescseq.arg[0]-1);
+        tmoveto_origin(csiescseq.arg[1]-1, csiescseq.arg[0]-1);
         break;
     case 'I': /* CHT -- Cursor Forward Tabulation <n> tab stops */
         DEFAULT(csiescseq.arg[0], 1);
@@ -1860,7 +1881,7 @@ csihandle(void)
         break;
     case 'd': /* VPA -- Move to <row> */
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(term.c.x, csiescseq.arg[0]-1);
+        tmoveto_origin(term.c.x, csiescseq.arg[0]-1);
         break;
     case 'h': /* SM -- Set terminal mode */
         tsetmode(csiescseq.priv, 1, csiescseq.arg, csiescseq.narg);
@@ -1876,15 +1897,14 @@ csihandle(void)
         }
         break;
     case 'r': /* DECSTBM -- Set Scrolling Region */
-        die("set scrolling region not supported\n");
-        // if (csiescseq.priv) {
-        //     goto unknown;
-        // } else {
-        //     DEFAULT(csiescseq.arg[0], 1);
-        //     DEFAULT(csiescseq.arg[1], term.row);
-        //     tsetscroll(csiescseq.arg[0]-1, csiescseq.arg[1]-1);
-        //     tmoveato(0, 0);
-        // }
+        if (csiescseq.priv) {
+            goto unknown;
+        } else {
+            DEFAULT(csiescseq.arg[0], 1);
+            DEFAULT(csiescseq.arg[1], term.row);
+            tscrollregion(csiescseq.arg[0]-1, csiescseq.arg[1]-1);
+            tmoveto_origin(0, 0);
+        }
         break;
     case 's': /* DECSC -- Save cursor position (ANSI.SYS) */
         tcursor(CURSOR_SAVE);
@@ -2659,6 +2679,7 @@ tresize(int col, int row)
     /* update terminal size */
     term.col = col;
     term.row = row;
+    tscrollregion(0, row-1);
 }
 
 void
