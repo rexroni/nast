@@ -45,7 +45,9 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
     if(mode & MODE_KBDLOCK) die("KBDLOCK mode not handled\n");
     if(mode & MODE_HIDE) die("HIDE mode not handled\n");
     if(mode & MODE_MOUSESGR) die("MOUSESGR mode not handled\n");
-    if(mode & MODE_8BIT) die("8BIT mode not handled\n");
+    if(mode & MODE_8BIT){
+        // TODO: does 8bit mode mean anything to us?  Or 7bit mode?
+    }
     if(mode & MODE_BLINK) die("BLINK mode not handled\n");
     if(mode & MODE_FBLINK) die("FBLINK mode not handled\n");
     if(mode & MODE_FOCUS) die("FOCUS mode not handled\n");
@@ -55,13 +57,13 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
     if(mode & MODE_NUMLOCK) die("NUMLOCK mode not handled\n");
 
     // this one is a conglomerate of other modes
-    if(mode & MODE_MOUSE) die("NUMLOCK mode not handled\n");
+    if(mode & MODE_MOUSE) die("MODE_MOUSE mode not handled\n");
 }
 
 void set_title(THooks *thooks, const char *title){
     (void)thooks;
     (void)title;
-    die("set_title() not handled\n");
+    // we will always just ignore this and leave ourselves called "nast"
 }
 
 void set_clipboard(THooks *thooks, char *buf, size_t len){

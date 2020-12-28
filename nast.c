@@ -44,6 +44,9 @@
 #define ISCONTROL(c)        (ISCONTROLC0(c) || ISCONTROLC1(c))
 #define ISDELIM(u)        (u && wcschr(worddelimiters, u))
 
+// pointer-based macros
+#define tIS_SET(flag)        ((term->mode & (flag)) != 0)
+
 enum term_mode {
     MODE_WRAP        = 1 << 0,
     MODE_INSERT      = 1 << 1,
@@ -133,6 +136,7 @@ typedef struct {
     size_t rlines_cap;   // cap = item length of the physical buffer
     size_t rlines_start; // the oldest line in memory
     size_t rlines_end;   // non-inclusive endpoint
+    uint64_t line_id;    // current line UID
 
     // how many lines we have forgotten in total
     size_t forgotten;
@@ -201,6 +205,7 @@ static void tprinter(char *, size_t);
 static void tdumpsel(void);
 static void tdumpline(int);
 static void tdump(void);
+static void temit(Term*, Rune, int);
 static void tclearregion_abs(int, int, int, int);
 static void tclearregion_term(int, int, int, int);
 static void tcursor(int);
@@ -211,10 +216,11 @@ static void tinsertblank(int);
 static void tinsertblankline(int);
 static int tlinelen(int);
 static void tmoveto(int, int);
-static void tnewline(int);
+static void tnewline(int, bool);
 static void tputtab(int);
 static void tputc(Rune);
 static void treset(void);
+static RLine *tnew_rline(Term *term, uint64_t line_id);
 static void tscrollup(int, int);
 static void tscrolldown(int, int);
 static void tsetattr(int *, int);
@@ -289,6 +295,14 @@ static inline size_t abs2term(size_t idx){
 
 static inline size_t term2abs(size_t idx){
     return idx + (rlines_len() - term.row);
+}
+
+static inline uint64_t new_line_id(Term *term){
+    return ++term->line_id;
+}
+
+static inline RLine *get_cursor_rline(Term *term){
+    return get_rline(term2abs(term->c.y));
 }
 
 static uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
@@ -1136,7 +1150,7 @@ tnew(int col, int row, char *font_name, THooks *hooks)
 
     // start with the first window of lines allocated
     for(size_t i = 0; i < row; i++){
-        term.rlines[term.rlines_end++] = rline_new(col);
+        term.rlines[term.rlines_end++] = rline_new(col, new_line_id(&term));
     }
 
     tresize(col, row);
@@ -1226,26 +1240,22 @@ selscroll(int orig, int n)
 }
 
 void
-tnewline(int first_col)
+tnewline(int first_col, bool continue_line)
 {
     // move the cursor down a line
     term.c.y++;
 
+    uint64_t line_id;
+    if(continue_line){
+        line_id = get_cursor_rline(&term)->line_id;
+    }else{
+        line_id = new_line_id(&term);
+    }
+
     // do we need a new line?
     if(term.c.y == term.row){
         term.c.y--;
-        // is ring buffer full?
-        if(rlines_len() == term.rlines_cap){
-            // free oldest rline
-            rline_free(&term.rlines[term.rlines_start]);
-            // forget the oldest history element (start of the ring buffer)
-            term.rlines_start = rlines_idx(term.rlines_start + 1);
-            // TODO: deal with tlines
-        }
-
-        // extend the buffer
-        term.rlines[term.rlines_end] = rline_new(term.col);
-        term.rlines_end = rlines_idx(term.rlines_end + 1);
+        tnew_rline(&term, line_id);
 
         // hold the scroll window in place, if needed and possible
         if(term.scroll){
@@ -1255,6 +1265,9 @@ tnewline(int first_col)
     }
 
     tmoveto(first_col ? 0 : term.c.x, term.c.y);
+
+    // update the line_id
+    get_cursor_rline(&term)->line_id = line_id;
 }
 
 void
@@ -1959,8 +1972,8 @@ csireset(void)
 void
 strhandle(void)
 {
-    char *p = NULL, *buf;
-    int j, narg, par;
+    char *buf;
+    int narg, par;
 
     term.esc &= ~(ESC_STR_END|ESC_STR);
     strparse();
@@ -2246,7 +2259,7 @@ tcontrolcode(uchar ascii)
     case '\v':   /* VT */
     case '\n':   /* LF */
         /* go to first col if the mode is set */
-        tnewline(IS_SET(MODE_CRLF));
+        tnewline(IS_SET(MODE_CRLF), false);
         return;
     case '\a':   /* BEL */
         if (term.esc & ESC_STR_END) {
@@ -2283,7 +2296,7 @@ tcontrolcode(uchar ascii)
     case 0x84:   /* TODO: IND */
         break;
     case 0x85:   /* NEL -- Next line */
-        tnewline(1); /* always go to first col */
+        tnewline(1, false); /* always go to first col */
         break;
     case 0x86:   /* TODO: SSA */
     case 0x87:   /* TODO: ESA */
@@ -2368,7 +2381,7 @@ eschandle(uchar ascii)
         }
         break;
     case 'E': /* NEL -- Next line */
-        tnewline(1); /* always go to first col */
+        tnewline(1, false); /* always go to first col */
         break;
     case 'H': /* HTS -- Horizontal tab stop */
         term.tabs[term.c.x] = 1;
@@ -2411,6 +2424,8 @@ eschandle(uchar ascii)
     return 1;
 }
 
+/* handle one codepoint; either capture it as part of a sequence or emit it to
+   the terminal */
 void
 tputc(Rune u)
 {
@@ -2434,12 +2449,9 @@ tputc(Rune u)
     if (IS_SET(MODE_PRINT))
         tprinter(c, len);
 
-    /*
-     * STR sequence must be checked before anything else
-     * because it uses all following characters until it
-     * receives a ESC, a SUB, a ST or any other C1 control
-     * character.
-     */
+    /* STR sequence must be checked before anything else because it uses all
+       following characters until it receives a ESC, a SUB, a ST or any other
+       C1 control character. */
     if (term.esc & ESC_STR) {
         if (u == '\a' || u == 030 || u == 032 || u == 033 ||
            ISCONTROLC1(u)) {
@@ -2486,18 +2498,15 @@ tputc(Rune u)
     }
 
 check_control_code:
-    /*
-     * Actions of control codes must be performed as soon they arrive
-     * because they can be embedded inside a control sequence, and
-     * they must not cause conflicts with sequences.
-     */
+    /* Actions of control codes must be performed as soon they arrive
+       because they can be embedded inside a control sequence, and
+       they must not cause conflicts with sequences. */
     if (control) {
         tcontrolcode(u);
-        /*
-         * control codes are not shown ever
-         */
+        // control codes are not shown ever
         return;
-    } else if (term.esc & ESC_START) {
+    }
+    if (term.esc & ESC_START) {
         if (term.esc & ESC_CSI) {
             csiescseq.buf[csiescseq.len++] = u;
             if (BETWEEN(u, 0x40, 0x7E)
@@ -2520,40 +2529,46 @@ check_control_code:
             /* sequence already finished */
         }
         term.esc = 0;
-        /*
-         * All characters which form part of a sequence are not
-         * printed
-         */
+        // All characters which form part of a sequence are not printed
         return;
     }
     if (sel.ob.x != -1 && BETWEEN(term.c.y, sel.ob.y, sel.oe.y))
         selclear();
 
-    Glyph g = term.c.attr;
+    temit(&term, u, width);
+}
+
+
+void
+temit(Term *term, Rune u, int width)
+{
+    Glyph g = term->c.attr;
     g.u = u;
 
-    RLine *rline = get_rline(term2abs(term.c.y));
+    RLine *rline = get_cursor_rline(term);
 
-    if(term.c.state & CURSOR_WRAPNEXT){
-        rline->glyphs[term.c.x].mode |= ATTR_WRAP;
-        tnewline(1);
-        rline = get_rline(term2abs(term.c.y));
+    if(term->c.state & CURSOR_WRAPNEXT){
+        rline->glyphs[term->c.x].mode |= ATTR_WRAP;
+        tnewline(1, true);
+        // the rline has changed
+        rline = get_cursor_rline(term);
     }
 
     // TODO: handle double-width characters
 
-    if(IS_SET(MODE_INSERT)){
-        rline_insert_glyph(rline, term.c.x, g);
+    if(tIS_SET(MODE_INSERT)){
+        rline_insert_glyph(rline, term->c.x, g);
     }else{
-        rline_set_glyph(rline, term.c.x, g);
+        rline_set_glyph(rline, term->c.x, g);
     }
 
-    if(term.c.x + width < term.col){
-        tmoveto(term.c.x + width, term.c.y);
+    if(term->c.x + width < term->col){
+        tmoveto(term->c.x + width, term->c.y);
     }else{
-        term.c.state |= CURSOR_WRAPNEXT;
+        term->c.state |= CURSOR_WRAPNEXT;
     }
 }
+
 
 /*
 Read a stream of utf-8, and call tputc on each codepoint.
@@ -2617,7 +2632,7 @@ tresize(int col, int row)
 
     // make sure we have at least enough rlines to fill the screen
     while(rlines_len() < row){
-        term.rlines[term.rlines_end] = rline_new(col);
+        term.rlines[term.rlines_end] = rline_new(col, new_line_id(&term));
         term.rlines_end = rlines_idx(term.rlines_end + 1);
     }
 
@@ -2759,16 +2774,32 @@ void rline_free(RLine **rline){
     *rline = NULL;
 }
 
-RLine *rline_new(size_t n_glyphs){
+RLine *rline_new(size_t n_glyphs, uint64_t line_id){
     RLine *rline = xmalloc(sizeof(*rline));
     Glyph *glyphs = xmalloc(sizeof(*glyphs) * n_glyphs);
-    *rline = (RLine){.glyphs=glyphs, .n_glyphs=n_glyphs};
+    *rline = (RLine){.glyphs=glyphs, .n_glyphs=n_glyphs, .line_id=line_id};
     for(size_t i = 0; i < rline->n_glyphs; i++){
         rline->glyphs[i] = (Glyph){ .mode = ATTR_NORENDER };
     }
     return rline;
 }
 
+// create a new rline in the ring buffer, discarding the oldest one as needed.
+RLine *tnew_rline(Term *term, uint64_t line_id){
+    // is ring buffer full?
+    if(rlines_len() == term->rlines_cap){
+        // free oldest rline
+        rline_free(&term->rlines[term->rlines_start]);
+        // forget the oldest history element (start of the ring buffer)
+        term->rlines_start = rlines_idx(term->rlines_start + 1);
+    }
+    // extend the buffer
+    RLine *out = rline_new(term->col, line_id);
+    term->rlines[term->rlines_end] = out;
+    term->rlines_end = rlines_idx(term->rlines_end + 1);
+
+    return out;
+}
 
 // render
 double rline_subrender(RLine *rline, cairo_t *cr, PangoLayout *layout,

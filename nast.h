@@ -128,14 +128,9 @@ typedef struct {
        a line */
     bool rewrappable;
     size_t n_glyphs;
+    // consecutive physical lines of matching line_id form a logical line.
+    uint64_t line_id;
 } RLine;
-
-// terminal line, points to a set of RLines that contain one real line of text
-// (id = logical index of RLine + forgotten lines)
-typedef struct {
-    size_t start_id;
-    size_t end_id;
-} TLine;
 
 struct THooks;
 typedef struct THooks THooks;
@@ -205,7 +200,7 @@ struct rgb24 rgb24_from_index(unsigned int index);
 //////
 
 int twrite(const char *, int, int);
-RLine *rline_new(size_t n_glyphs);
+RLine *rline_new(size_t n_glyphs, uint64_t line_id);
 void rline_free(RLine **rline);
 // insert a glpyh before the index
 void rline_insert_glyph(RLine *rline, size_t idx, Glyph g);
