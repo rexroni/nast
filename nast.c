@@ -56,6 +56,11 @@ enum term_mode {
     MODE_PRINT       = 1 << 5,
     MODE_UTF8        = 1 << 6,
     MODE_SIXEL       = 1 << 7,
+    /* This used to be associated with the window rather than with the terminal
+       but I don't fully understand why.  I think that copy/paste mechanics
+       basically be a detail of the interface between libnast and the backend
+       (see architecture diagram in README) and not a window mode. */
+    MODE_BRCKTPASTE  = 1 << 8,
 };
 
 enum cursor_movement {
@@ -1688,7 +1693,9 @@ tsetmode(int priv, int set, int *args, int narg)
                 tcursor((set) ? CURSOR_SAVE : CURSOR_LOAD);
                 break;
             case 2004: /* 2004: bracketed paste mode */
-                term.hooks->set_mode(term.hooks, MODE_BRCKTPASTE, set);
+                // see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+                // search for "Ps = 2 0 0 4"
+                MODBIT(term.mode, set, MODE_BRCKTPASTE);
                 break;
             /* Not implemented mouse modes. See comments there. */
             case 1001: /* mouse highlight mode; can hang the

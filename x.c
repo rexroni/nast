@@ -181,8 +181,8 @@ static int mouseaction(XEvent *, uint);
 static void brelease(XEvent *);
 static void bpress(XEvent *);
 static void bmotion(XEvent *);
-static void propnotify(XEvent *);
-static void selnotify(XEvent *);
+// static void propnotify(XEvent *);
+// static void selnotify(XEvent *);
 static void selclear_(XEvent *);
 static void selrequest(XEvent *);
 static void setsel(char *, Time);
@@ -211,12 +211,12 @@ static void (*handler[LASTEvent])(XEvent *) = {
  * different in another window.
  */
 /*    [SelectionClear] = selclear_, */
-    [SelectionNotify] = selnotify,
+    // [SelectionNotify] = selnotify,
 /*
  * PropertyNotify is only turned on when there is some INCR transfer happening
  * for the selection retrieval.
  */
-    [PropertyNotify] = propnotify,
+    // [PropertyNotify] = propnotify,
     [SelectionRequest] = selrequest,
 };
 
@@ -481,106 +481,106 @@ bpress(XEvent *e)
     }
 }
 
-void
-propnotify(XEvent *e)
-{
-    XPropertyEvent *xpev;
-    Atom clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
+// void
+// propnotify(XEvent *e)
+// {
+//     XPropertyEvent *xpev;
+//     Atom clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
+//
+//     xpev = &e->xproperty;
+//     if (xpev->state == PropertyNewValue &&
+//             (xpev->atom == XA_PRIMARY ||
+//              xpev->atom == clipboard)) {
+//         selnotify(e);
+//     }
+// }
 
-    xpev = &e->xproperty;
-    if (xpev->state == PropertyNewValue &&
-            (xpev->atom == XA_PRIMARY ||
-             xpev->atom == clipboard)) {
-        selnotify(e);
-    }
-}
-
-void
-selnotify(XEvent *e)
-{
-    ulong nitems, ofs, rem;
-    int format;
-    uchar *data, *last, *repl;
-    Atom type, incratom, property = None;
-
-    incratom = XInternAtom(xw.dpy, "INCR", 0);
-
-    ofs = 0;
-    if (e->type == SelectionNotify)
-        property = e->xselection.property;
-    else if (e->type == PropertyNotify)
-        property = e->xproperty.atom;
-
-    if (property == None)
-        return;
-
-    do {
-        if (XGetWindowProperty(xw.dpy, xw.win, property, ofs,
-                    BUFSIZ/4, False, AnyPropertyType,
-                    &type, &format, &nitems, &rem,
-                    &data)) {
-            fprintf(stderr, "Clipboard allocation failed\n");
-            return;
-        }
-
-        if (e->type == PropertyNotify && nitems == 0 && rem == 0) {
-            /*
-             * If there is some PropertyNotify with no data, then
-             * this is the signal of the selection owner that all
-             * data has been transferred. We won't need to receive
-             * PropertyNotify events anymore.
-             */
-            MODBIT(xw.attrs.event_mask, 0, PropertyChangeMask);
-            XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask,
-                    &xw.attrs);
-        }
-
-        if (type == incratom) {
-            /*
-             * Activate the PropertyNotify events so we receive
-             * when the selection owner does send us the next
-             * chunk of data.
-             */
-            MODBIT(xw.attrs.event_mask, 1, PropertyChangeMask);
-            XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask,
-                    &xw.attrs);
-
-            /*
-             * Deleting the property is the transfer start signal.
-             */
-            XDeleteProperty(xw.dpy, xw.win, (int)property);
-            continue;
-        }
-
-        /*
-         * As seen in getsel:
-         * Line endings are inconsistent in the terminal and GUI world
-         * copy and pasting. When receiving some selection data,
-         * replace all '\n' with '\r'.
-         * FIXME: Fix the computer world.
-         */
-        repl = data;
-        last = data + nitems * format / 8;
-        while ((repl = memchr(repl, '\n', last - repl))) {
-            *repl++ = '\r';
-        }
-
-        if (IS_SET(MODE_BRCKTPASTE) && ofs == 0)
-            die_on_ttywrite("\033[200~", 6);
-        die_on_ttywrite((char *)data, nitems * format / 8);
-        if (IS_SET(MODE_BRCKTPASTE) && rem == 0)
-            die_on_ttywrite("\033[201~", 6);
-        XFree(data);
-        /* number of 32-bit chunks returned */
-        ofs += nitems * format / 32;
-    } while (rem > 0);
-
-    /*
-     * Deleting the property again tells the selection owner to send the
-     * next data chunk in the property.
-     */
-    XDeleteProperty(xw.dpy, xw.win, (int)property);
-}
+// void
+// selnotify(XEvent *e)
+// {
+//     ulong nitems, ofs, rem;
+//     int format;
+//     uchar *data, *last, *repl;
+//     Atom type, incratom, property = None;
+//
+//     incratom = XInternAtom(xw.dpy, "INCR", 0);
+//
+//     ofs = 0;
+//     if (e->type == SelectionNotify)
+//         property = e->xselection.property;
+//     else if (e->type == PropertyNotify)
+//         property = e->xproperty.atom;
+//
+//     if (property == None)
+//         return;
+//
+//     do {
+//         if (XGetWindowProperty(xw.dpy, xw.win, property, ofs,
+//                     BUFSIZ/4, False, AnyPropertyType,
+//                     &type, &format, &nitems, &rem,
+//                     &data)) {
+//             fprintf(stderr, "Clipboard allocation failed\n");
+//             return;
+//         }
+//
+//         if (e->type == PropertyNotify && nitems == 0 && rem == 0) {
+//             /*
+//              * If there is some PropertyNotify with no data, then
+//              * this is the signal of the selection owner that all
+//              * data has been transferred. We won't need to receive
+//              * PropertyNotify events anymore.
+//              */
+//             MODBIT(xw.attrs.event_mask, 0, PropertyChangeMask);
+//             XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask,
+//                     &xw.attrs);
+//         }
+//
+//         if (type == incratom) {
+//             /*
+//              * Activate the PropertyNotify events so we receive
+//              * when the selection owner does send us the next
+//              * chunk of data.
+//              */
+//             MODBIT(xw.attrs.event_mask, 1, PropertyChangeMask);
+//             XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask,
+//                     &xw.attrs);
+//
+//             /*
+//              * Deleting the property is the transfer start signal.
+//              */
+//             XDeleteProperty(xw.dpy, xw.win, (int)property);
+//             continue;
+//         }
+//
+//         /*
+//          * As seen in getsel:
+//          * Line endings are inconsistent in the terminal and GUI world
+//          * copy and pasting. When receiving some selection data,
+//          * replace all '\n' with '\r'.
+//          * FIXME: Fix the computer world.
+//          */
+//         repl = data;
+//         last = data + nitems * format / 8;
+//         while ((repl = memchr(repl, '\n', last - repl))) {
+//             *repl++ = '\r';
+//         }
+//
+//         if (IS_SET(MODE_BRCKTPASTE) && ofs == 0)
+//             die_on_ttywrite("\033[200~", 6);
+//         die_on_ttywrite((char *)data, nitems * format / 8);
+//         if (IS_SET(MODE_BRCKTPASTE) && rem == 0)
+//             die_on_ttywrite("\033[201~", 6);
+//         XFree(data);
+//         /* number of 32-bit chunks returned */
+//         ofs += nitems * format / 32;
+//     } while (rem > 0);
+//
+//     /*
+//      * Deleting the property again tells the selection owner to send the
+//      * next data chunk in the property.
+//      */
+//     XDeleteProperty(xw.dpy, xw.win, (int)property);
+// }
 
 void
 xclipcopy(void)

@@ -53,7 +53,6 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
     if(mode & MODE_FOCUS) die("FOCUS mode not handled\n");
     if(mode & MODE_MOUSEX10) die("MOUSEX10 mode not handled\n");
     if(mode & MODE_MOUSEMANY) die("MOUSEMANY mode not handled\n");
-    if(mode & MODE_BRCKTPASTE) die("BRCKTPASTE mode not handled\n");
     if(mode & MODE_NUMLOCK) die("NUMLOCK mode not handled\n");
 
     // this one is a conglomerate of other modes
