@@ -118,14 +118,6 @@ typedef Glyph* Line;
 typedef struct {
     cairo_surface_t *srfc;
     Glyph *glyphs;
-    // can this line be rewrapped with the prev/next lines?
-    bool ends_line;
-    /* in order to detect rewrappable lines, we must be able to detect behavior
-       which is not acceptable for rewrapping.  Unacceptable means writing any
-       character which was neither an overwrite of an existing character nor an
-       append to the end of a block of characters starting at the beginning of
-       a line */
-    bool rewrappable;
     size_t n_glyphs;
     // consecutive physical lines of matching line_id form a logical line.
     uint64_t line_id;

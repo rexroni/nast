@@ -47,6 +47,9 @@
 // pointer-based macros
 #define tIS_SET(flag)        ((term->mode & (flag)) != 0)
 
+// actually there is one less line than this...
+#define RLINES_LIMIT 10000
+
 enum term_mode {
     MODE_WRAP        = 1 << 0,
     MODE_INSERT      = 1 << 1,
@@ -225,7 +228,7 @@ static void tnewline(int, bool);
 static void tputtab(int);
 static void tputc(Rune);
 static void treset(void);
-static RLine *tnew_rline(Term *term, uint64_t line_id);
+static RLine *tnew_rline(Term *term, uint64_t line_id, size_t cols);
 static void tscrollup(int, int);
 static void tscrolldown(int, int);
 static void tsetattr(int *, int);
@@ -1147,7 +1150,7 @@ tnew(int col, int row, char *font_name, THooks *hooks)
     }
 
     // allocate history
-    term.rlines_cap = 10000 - 1;
+    term.rlines_cap = RLINES_LIMIT - 1;
     size_t nbytes = (term.rlines_cap + 1) * sizeof(*term.rlines);
     term.rlines = xmalloc(nbytes);
     // all lines start empty
@@ -1158,7 +1161,15 @@ tnew(int col, int row, char *font_name, THooks *hooks)
         term.rlines[term.rlines_end++] = rline_new(col, new_line_id(&term));
     }
 
-    tresize(col, row);
+    term.row = row;
+    term.col = col;
+
+    term.line = xrealloc(term.line, row * sizeof(Line));
+    term.alt  = xrealloc(term.alt,  row * sizeof(Line));
+    term.dirty = xrealloc(term.dirty, row * sizeof(*term.dirty));
+    term.tabs = xrealloc(term.tabs, col * sizeof(*term.tabs));
+
+    tscrollregion(0, row-1);
     treset();
 }
 
@@ -1247,9 +1258,6 @@ selscroll(int orig, int n)
 void
 tnewline(int first_col, bool continue_line)
 {
-    // move the cursor down a line
-    term.c.y++;
-
     uint64_t line_id;
     if(continue_line){
         line_id = get_cursor_rline(&term)->line_id;
@@ -1257,10 +1265,13 @@ tnewline(int first_col, bool continue_line)
         line_id = new_line_id(&term);
     }
 
+    // move the cursor down a line
+    term.c.y++;
+
     // do we need a new line?
     if(term.c.y == term.row){
         term.c.y--;
-        tnew_rline(&term, line_id);
+        tnew_rline(&term, line_id, term.col);
 
         // hold the scroll window in place, if needed and possible
         if(term.scroll){
@@ -2615,32 +2626,125 @@ twrite(const char *buf, int buflen, int show_ctrl)
 void
 tresize(int col, int row)
 {
+    int old_col = term.col;
+
+    /* cursor reflow logic: as we reflow lines, we need to reflow the cursor's
+       position as well; so keep track of the rline whose position is under
+       the cursor, and figure out which y that points us to later */
+    RLine *old_cursor_rline = get_cursor_rline(&term);
+    int old_cursor_x = term.c.x;
+    int new_cursor_x = 0;
+    int new_cursor_abs_y = 0;
+    RLine *new_cursor_rline = NULL;
+    if(old_cursor_rline->line_id == 0)
+        die("unsure how to handle old_cursor_line_id == 0\n");
+
+    // cursor reflow: reset CURSOR_WRAPNEXT, but remember if it was set
+    bool old_wrapnext = term.c.state & CURSOR_WRAPNEXT;
+    term.c.state &= ~CURSOR_WRAPNEXT;
+
     printf("tresize(%d, %d)\n", col, row);
     int *bp;
 
     if (col < 1 || row < 1) {
-        fprintf(stderr,
-                "tresize: error resizing to %dx%d\n", col, row);
+        fprintf(stderr, "tresize: error resizing to %dx%d\n", col, row);
         return;
     }
 
     tunrender();
 
-    // TODO: redraw existing rlines with new linebreaks
-    // (until then, just extend or trim lines as needed)
-    for(size_t i = 0; i < rlines_len(); i++){
-        RLine *rline = get_rline(i);
-        rline->glyphs = xrealloc(rline->glyphs, sizeof(*rline->glyphs) * col);
-        rline->n_glyphs = col;
-        for(int c = term.col; c < col; c++){
-            rline->glyphs[c] = (Glyph){ .mode = ATTR_NORENDER };
+    // create duplicate rlines
+    RLine **old_rlines = term.rlines;
+    size_t old_len = rlines_len();
+    size_t old_start = term.rlines_start;
+    size_t nbytes = (term.rlines_cap + 1) * sizeof(*term.rlines);
+    term.rlines = xmalloc(nbytes);
+    // all lines start empty
+    memset(term.rlines, 0, nbytes);
+
+    // no lines allocated yet
+    term.rlines_start = 0;
+    term.rlines_end = 0;
+
+    // the line_id of the current logical line from old_lines
+    size_t old_line_id = 0;
+    // the current rline we are writing to
+    RLine *new = NULL;
+    size_t glyph_idx = 0;
+
+    // copy each old rline into a new rline
+    for(size_t i = 0; i < old_len; i++){
+        // get the next old rline
+        size_t idx = (old_start + i) % (term.rlines_cap + 1);
+        RLine *old = old_rlines[idx];
+        // ignore id=0 lines, which are the initial empty lines
+        if(!old->line_id) goto cu_rline;
+        // does this old_line have a different line_id than what we last saw?
+        if(!new || old_line_id != old->line_id){
+            new = tnew_rline(&term, new_line_id(&term), col);
+            glyph_idx = 0;
+            old_line_id = old->line_id;
         }
+        // copy all of the contents of this rline to the new rline
+        for(size_t j = 0; j < old->n_glyphs; j++){
+            // TODO: handle wide glpyhs
+            Glyph g = old->glyphs[j];
+            // ignore glyphs that need no copying
+            if(g.mode & ATTR_NORENDER) continue;
+            // do we need a new rline?
+            if(glyph_idx >= col){
+                // use the same line_id as the last one
+                new = tnew_rline(&term, new->line_id, col);
+                glyph_idx = 0;
+            }
+            // actually copy a glyph into the new line
+            new->glyphs[glyph_idx] = g;
+            // cursor reflow: cursor-over-copyable-glyph case
+            if(old == old_cursor_rline && old_cursor_x == j){
+                new_cursor_rline = new;
+                new_cursor_x = glyph_idx;
+                new_cursor_abs_y = rlines_len() - 1;
+                // if the cursor was set to WRAPNEXT, bump x if it's safe to
+                if(old_wrapnext){
+                    if(new_cursor_x + 1 < new->n_glyphs){
+                        /* in the case that WRAPNEXT was set and the cursor
+                           position after reflowing is in the middle of the
+                           line, just bump the cursor forward a little bit */
+                        new_cursor_x++;
+                    }else{
+                        /* in the corner case where WRAPNEXT was set, but after
+                           resizing the cursor position is still right on the
+                           edge of the screen, just set WRAPNEXT again */
+                        term.c.state |= CURSOR_WRAPNEXT;
+                    }
+                }
+            }
+            glyph_idx++;
+        }
+        /* cursor reflow: cursor-not-over-copyable-glyph case: just place the
+           cursor at the end of the line to support 99.99% of cases */
+        if(old == old_cursor_rline && new_cursor_rline == NULL){
+            new_cursor_rline = new;
+            new_cursor_x = glyph_idx;
+            if(new_cursor_x >= new->n_glyphs){
+                /* if placing the cursor after the last glyph would place it
+                   off of the screen, place it on top of the last glyph and
+                   set WRAPNEXT */
+                new_cursor_x = new->n_glyphs - 1;
+                term.c.state |= CURSOR_WRAPNEXT;
+            }
+            new_cursor_abs_y = rlines_len() - 1;
+        }
+
+    cu_rline:
+        rline_free(&old);
     }
+
+    free(old_rlines);
 
     // make sure we have at least enough rlines to fill the screen
     while(rlines_len() < row){
-        term.rlines[term.rlines_end] = rline_new(col, new_line_id(&term));
-        term.rlines_end = rlines_idx(term.rlines_end + 1);
+        tnew_rline(&term, 0, col);
     }
 
     /* TODO: Deal with scroll at some point.
@@ -2659,24 +2763,15 @@ tresize(int col, int row)
 
        So suppose we're on the 0th row of a 40-row terminal, and we resize to
        a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines. */
-    if(term.row - term.c.y > row){
-        size_t n_extras = term.row - term.c.y - row;
+    size_t y_max = rlines_len() - 1;
+    if(y_max - new_cursor_abs_y > row){
+        size_t n_extras = y_max - new_cursor_abs_y - row;
         for(size_t i = 0; i < n_extras; i++){
             RLine *rline = get_rline(rlines_len() - 1);
             rline_free(&rline);
             term.rlines_end = rlines_idx(rlines_len() - 1);
         }
-        // the absolute position of the cursor hasn't changed, so this is fine
-        // term.c.y = term.c.y
-    }
-
-    // reset CURSOR_WRAPNEXT if the screen got wider
-    if(col > term.col){
-        term.c.state &= ~CURSOR_WRAPNEXT;
-    // set CURSOR_WRAPNEXT if the screen got narrower than what is there
-    }else if(col < term.col && term.c.x < col){
-        term.c.state |= CURSOR_WRAPNEXT;
-        term.c.x = term.col;
+        // no change to x or absolute y position
     }
 
     // TODO: deal with altscreen
@@ -2688,10 +2783,10 @@ tresize(int col, int row)
     term.tabs = xrealloc(term.tabs, col * sizeof(*term.tabs));
 
     // fix tabs
-    if (col > term.col) {
-        bp = term.tabs + term.col;
+    if (col > old_col) {
+        bp = term.tabs + old_col;
 
-        memset(bp, 0, sizeof(*term.tabs) * (col - term.col));
+        memset(bp, 0, sizeof(*term.tabs) * (col - old_col));
         while (--bp > term.tabs && !*bp)
             /* nothing */ ;
         for (bp += tabspaces; bp < term.tabs + col; bp += tabspaces)
@@ -2701,6 +2796,11 @@ tresize(int col, int row)
     /* update terminal size */
     term.col = col;
     term.row = row;
+
+    // set the reflowed cursor position
+    term.c.x = new_cursor_x;
+    term.c.y = abs2term(new_cursor_abs_y);
+
     tscrollregion(0, row-1);
 }
 
@@ -2792,7 +2892,7 @@ RLine *rline_new(size_t n_glyphs, uint64_t line_id){
 }
 
 // create a new rline in the ring buffer, discarding the oldest one as needed.
-RLine *tnew_rline(Term *term, uint64_t line_id){
+RLine *tnew_rline(Term *term, uint64_t line_id, size_t cols){
     // is ring buffer full?
     if(rlines_len() == term->rlines_cap){
         // free oldest rline
@@ -2801,7 +2901,7 @@ RLine *tnew_rline(Term *term, uint64_t line_id){
         term->rlines_start = rlines_idx(term->rlines_start + 1);
     }
     // extend the buffer
-    RLine *out = rline_new(term->col, line_id);
+    RLine *out = rline_new(cols, line_id);
     term->rlines[term->rlines_end] = out;
     term->rlines_end = rlines_idx(term->rlines_end + 1);
 
