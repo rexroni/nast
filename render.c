@@ -1,6 +1,7 @@
 #include <cairo.h>
 #include <gtk/gtk.h>
 #include <cairo/cairo-xlib.h>
+#include <sys/ioctl.h>
 
 #include "nast.h"
 #include "writable.h"
@@ -15,11 +16,32 @@ typedef struct {
     // state
     bool appcursor;
     bool appkeypad;
-} render_thooks_t;
+
+    GtkIMContext *im_ctx;
+    int ttyfd;
+    struct writable writable;
+    gboolean write_pending;
+    GtkWidget *window;
+    GtkWidget *darea;
+    GIOChannel *wr_ttychan;
+} globals_t;
 
 static void die_on_ttywrite(THooks *thooks, const char *buf, size_t len){
     (void)thooks; (void)buf; (void)len;
     die("we don't support tty writes from the terminal yet\n");
+}
+
+void ttyresize(THooks *thooks, int row, int col){
+    globals_t *g = (globals_t*)thooks;
+
+    // TIOCSWINSZ = "Tty IO Ctl Set WINdow SiZe" (man 4 ioctl_tty)
+    struct winsize w = {
+        .ws_row = row,
+        .ws_col = col,
+    };
+
+    if (ioctl(g->ttyfd, TIOCSWINSZ, &w) < 0)
+        fprintf(stderr, "Couldn't set window size: %s\n", strerror(errno));
 }
 
 void bell(THooks *thooks){
@@ -27,14 +49,14 @@ void bell(THooks *thooks){
 }
 
 static void set_mode(THooks *thooks, enum win_mode mode, int val){
-    render_thooks_t *rhks = (render_thooks_t*)thooks;
+    globals_t *g = (globals_t*)thooks;
 
     if(mode & MODE_APPCURSOR){
-        rhks->appcursor = (bool)val;
+        g->appcursor = (bool)val;
     }
 
     if(mode & MODE_APPKEYPAD){
-        rhks->appkeypad = (bool)val;
+        g->appkeypad = (bool)val;
     }
 
     if(mode & MODE_VISIBLE) die("VISIBLE mode not handled\n");
@@ -43,7 +65,9 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
     if(mode & MODE_MOUSEMOTION) die("MOUSEMOTION mode not handled\n");
     if(mode & MODE_REVERSE) die("REVERSE mode not handled\n");
     if(mode & MODE_KBDLOCK) die("KBDLOCK mode not handled\n");
-    if(mode & MODE_HIDE) die("HIDE mode not handled\n");
+    if(mode & MODE_HIDE){
+        // TODO: start rendering a cursor so that we can start hiding it.
+    }
     if(mode & MODE_MOUSESGR) die("MOUSESGR mode not handled\n");
     if(mode & MODE_8BIT){
         // TODO: does 8bit mode mean anything to us?  Or 7bit mode?
@@ -78,17 +102,6 @@ void set_clipboard(THooks *thooks, char *buf, size_t len){
 
 // TODO: not this.
 #define IS_SET(arg) TRUE
-
-typedef struct {
-    GtkIMContext *im_ctx;
-    int ttyfd;
-    struct writable writable;
-    gboolean write_pending;
-    GtkWidget *window;
-    GtkWidget *darea;
-    GIOChannel *wr_ttychan;
-    render_thooks_t rhks;
-} globals_t;
 
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
     if(!g->write_pending){
@@ -199,7 +212,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 
     // some things will wrongly be captured by the im_context, like keypad
     if(event_key->type == GDK_KEY_PRESS){
-        bool x = g->rhks.appkeypad;
+        bool x = g->appkeypad;
         switch(event_key->keyval){
             // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-8
             case GDK_KEY_KP_0:
@@ -308,16 +321,16 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
             // arrow keys
             // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-6
             case GDK_KEY_Up:
-                ttywrite(g, g->rhks.appcursor ? "\x1b[A" : "\x1bOA", 3, 0);
+                ttywrite(g, g->appcursor ? "\x1b[A" : "\x1bOA", 3, 0);
                 return TRUE;
             case GDK_KEY_Down:
-                ttywrite(g, g->rhks.appcursor ? "\x1b[B" : "\x1bOB", 3, 0);
+                ttywrite(g, g->appcursor ? "\x1b[B" : "\x1bOB", 3, 0);
                 return TRUE;
             case GDK_KEY_Right:
-                ttywrite(g, g->rhks.appcursor ? "\x1b[C" : "\x1bOC", 3, 0);
+                ttywrite(g, g->appcursor ? "\x1b[C" : "\x1bOC", 3, 0);
                 return TRUE;
             case GDK_KEY_Left:
-                ttywrite(g, g->rhks.appcursor ? "\x1b[D" : "\x1bOD", 3, 0);
+                ttywrite(g, g->appcursor ? "\x1b[D" : "\x1bOD", 3, 0);
                 return TRUE;
         }
 
@@ -472,14 +485,13 @@ void prep_channel(GIOChannel *chan){
 
 int main(int argc, char *argv[]){
     globals_t g = {
-        .rhks = {
-            .hooks = {
-                .ttywrite = die_on_ttywrite,
-                .bell = bell,
-                .set_mode = set_mode,
-                .set_title = set_title,
-                .set_clipboard = set_clipboard,
-            },
+        .hooks = {
+            .ttywrite = die_on_ttywrite,
+            .ttyresize = ttyresize,
+            .bell = bell,
+            .set_mode = set_mode,
+            .set_title = set_title,
+            .set_clipboard = set_clipboard,
         },
     };
 
@@ -519,7 +531,7 @@ int main(int argc, char *argv[]){
     gtk_widget_show_all(g.window);
 
     // create the terminal
-    tnew(80, 40, "monospace 10", (THooks*)&g.rhks);
+    tnew(80, 40, "monospace 10", (THooks*)&g);
 
     // g.ttyfd = ttynew(NULL, "/bin/sh", NULL, (char*[]){"cat", NULL});
     g.ttyfd = ttynew(NULL, "/bin/sh", NULL, NULL);

@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -919,21 +918,6 @@ ttyread(void)
         memmove(buf, buf + written, buflen);
 
     return ret;
-}
-
-
-void
-ttyresize(int tw, int th)
-{
-    printf("resizing to height = T%d\n", th);
-    struct winsize w;
-
-    w.ws_row = term.row;
-    w.ws_col = term.col;
-    w.ws_xpixel = tw;
-    w.ws_ypixel = th;
-    if (ioctl(cmdfd, TIOCSWINSZ, &w) < 0)
-        fprintf(stderr, "Couldn't set window size: %s\n", strerror(errno));
 }
 
 void
@@ -2802,6 +2786,9 @@ tresize(int col, int row)
     term.c.y = abs2term(new_cursor_abs_y);
 
     tscrollregion(0, row-1);
+
+    // send a signal to the application in the terminal
+    term.hooks->ttyresize(term.hooks, row, col);
 }
 
 void

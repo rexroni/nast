@@ -129,6 +129,9 @@ typedef struct THooks THooks;
 struct THooks {
     // for writing to TTY for certain control codes
     void (*ttywrite)(THooks*, const char *, size_t);
+    /* a little convoluted: calling trender() with new dimensions will cause
+       the terminal to trigger this callback. */
+    void (*ttyresize)(THooks*, int tw, int th);
     void (*bell)(THooks*);
     void (*set_mode)(THooks*, enum win_mode, int);
     void (*set_title)(THooks*, const char *);
@@ -159,7 +162,6 @@ void tsetdirtattr(int);
 void ttyhangup(void);
 int ttynew(char *, char *, char *, char **);
 size_t ttyread(void);
-void ttyresize(int, int);
 
 void selclear(void);
 void selinit(void);
