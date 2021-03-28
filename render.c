@@ -2,18 +2,25 @@
 #include <gtk/gtk.h>
 #include <cairo/cairo-xlib.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
+#include <termios.h>
 
 #include "nast.h"
 #include "writable.h"
 
 #include "keymap.h"
 
+#include "config.h"
+
 static gboolean tty_io(GIOChannel *src, GIOCondition cond, gpointer user_data);
 
 typedef struct {
     // hooks pointer, must be the first element
     THooks hooks;
-    // state
+    Term *term;
+    pid_t pid;
+
+    // rendering and io state
     bool appcursor;
     bool appkeypad;
 
@@ -26,12 +33,15 @@ typedef struct {
     GIOChannel *wr_ttychan;
 } globals_t;
 
+// sigchld needs to know the globals I guess?
+globals_t *G;
+
 static void die_on_ttywrite(THooks *thooks, const char *buf, size_t len){
     (void)thooks; (void)buf; (void)len;
     die("we don't support tty writes from the terminal yet\n");
 }
 
-void ttyresize(THooks *thooks, int row, int col){
+static void ttyresize_hook(THooks *thooks, int row, int col){
     globals_t *g = (globals_t*)thooks;
 
     // TIOCSWINSZ = "Tty IO Ctl Set WINdow SiZe" (man 4 ioctl_tty)
@@ -44,8 +54,21 @@ void ttyresize(THooks *thooks, int row, int col){
         fprintf(stderr, "Couldn't set window size: %s\n", strerror(errno));
 }
 
-void bell(THooks *thooks){
+static void ttyhangup_hook(THooks *thooks){
+    globals_t *g = (globals_t*)thooks;
+    /* Send SIGHUP to shell */
+    kill(g->pid, SIGHUP);
+}
+
+static void bell_hook(THooks *thooks){
     (void)thooks;
+}
+
+static void sendbreak_hook(THooks *thooks){
+    globals_t *g = (globals_t*)thooks;
+    if (tcsendbreak(g->ttyfd, 0)){
+        perror("Error sending break");
+    }
 }
 
 static void set_mode(THooks *thooks, enum win_mode mode, int val){
@@ -110,7 +133,7 @@ void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
     }
 
     if(may_echo && IS_SET(MODE_ECHO)) {
-        twrite(s, n, 1);
+        twrite(g->term, s, n, 1);
     }
 
     if(!IS_SET(MODE_CRLF)){
@@ -199,7 +222,7 @@ static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
 
     double x1, y1, x2, y2;
     cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
-    trender(cr, w, h, x1, y1, x2, y2);
+    trender(g->term, cr, w, h, x1, y1, x2, y2);
 
     // allow other handlers to process the event
     return FALSE;
@@ -377,7 +400,7 @@ static gboolean tty_read(GIOChannel *src, globals_t *g){
     //     if(buf[i] == '\n') continue;
     //     buf[i] = 'X';
     // }
-    twrite(buf, bytes_read, 0);
+    twrite(g->term, buf, bytes_read, 0);
     // redraw
     gtk_widget_queue_draw(g->darea);
     // always be ready to read again
@@ -483,17 +506,39 @@ void prep_channel(GIOChannel *chan){
     }
 }
 
+void sigchld(int a){
+    int stat;
+    pid_t p;
+
+    /* TODO: in the case of multiple children, react differently based on which
+             one die died */
+    if ((p = waitpid(-1, &stat, WNOHANG)) < 0)
+        die("wait() after SIGCHLD failed: %s\n", strerror(errno));
+
+    if (p != G->pid)
+        return;
+
+    if (WIFEXITED(stat) && WEXITSTATUS(stat))
+        die("child exited with status %d\n", WEXITSTATUS(stat));
+    else if (WIFSIGNALED(stat))
+        die("child terminated due to signal %d\n", WTERMSIG(stat));
+    exit(0);
+}
+
 int main(int argc, char *argv[]){
     globals_t g = {
         .hooks = {
             .ttywrite = die_on_ttywrite,
-            .ttyresize = ttyresize,
-            .bell = bell,
+            .ttyresize = ttyresize_hook,
+            .ttyhangup = ttyhangup_hook,
+            .bell = bell_hook,
+            .sendbreak = sendbreak_hook,
             .set_mode = set_mode,
             .set_title = set_title,
             .set_clipboard = set_clipboard,
         },
     };
+    G = &g;
 
     gtk_init(&argc, &argv);
 
@@ -531,10 +576,11 @@ int main(int argc, char *argv[]){
     gtk_widget_show_all(g.window);
 
     // create the terminal
-    tnew(80, 40, "monospace 10", (THooks*)&g);
+    tnew(&g.term, 80, 40, "monospace 10", (THooks*)&g);
 
-    // g.ttyfd = ttynew(NULL, "/bin/sh", NULL, (char*[]){"cat", NULL});
-    g.ttyfd = ttynew(NULL, "/bin/sh", NULL, NULL);
+    // g.ttyfd = ttynew(g.term, NULL, "/bin/sh", NULL, (char*[]){"cat", NULL});
+    g.ttyfd = ttynew(g.term, &g.pid, NULL, shell, NULL, NULL);
+    signal(SIGCHLD, sigchld);
 
     // add the ttyfd to the main loop
     GIOChannel *ttychan = g_io_channel_unix_new(g.ttyfd);
@@ -554,7 +600,7 @@ int main(int argc, char *argv[]){
 
     // write some shit
     char buf[] = "\x1b[35mhello\x1b[m \x1b[45mworld\x1b[m!\r\nthis \x1b[45mis a\r\n\x1b[30mtest\x1b[m\r\n";
-    twrite(buf, sizeof(buf) - 1,  0);
+    twrite(g.term, buf, sizeof(buf) - 1,  0);
 
     gtk_main();
 

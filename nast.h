@@ -25,6 +25,9 @@
                 (t1.tv_nsec-t2.tv_nsec)/1E6)
 #define MODBIT(x, set, bit)    ((set) ? ((x) |= (bit)) : ((x) &= ~(bit)))
 
+struct Term;
+typedef struct Term Term;
+
 enum glyph_attribute {
     ATTR_NULL       = 0,
     ATTR_BOLD       = 1 << 0,
@@ -132,7 +135,9 @@ struct THooks {
     /* a little convoluted: calling trender() with new dimensions will cause
        the terminal to trigger this callback. */
     void (*ttyresize)(THooks*, int tw, int th);
+    void (*ttyhangup)(THooks*);
     void (*bell)(THooks*);
+    void (*sendbreak)(THooks*);
     void (*set_mode)(THooks*, enum win_mode, int);
     void (*set_title)(THooks*, const char *);
     void (*set_clipboard)(THooks*, char *buf, size_t len);
@@ -147,28 +152,28 @@ typedef union {
 } Arg;
 
 void die(const char *, ...);
-void redraw(void);
-void draw(void);
+void redraw(Term *t);
+void draw(Term *t);
 
-void printscreen(const Arg *);
-void printsel(const Arg *);
+void printscreen(Term *t, const Arg *);
+void printsel(Term *t, const Arg *);
 void sendbreak(const Arg *);
-void toggleprinter(const Arg *);
+void toggleprinter(Term *t, const Arg *);
 
-int tattrset(int);
-void tnew(int col, int row, char *font_name, THooks *hooks);
-void tresize(int, int);
-void tsetdirtattr(int);
-void ttyhangup(void);
-int ttynew(char *, char *, char *, char **);
-size_t ttyread(void);
+int tattrset(Term *t, int);
+void tnew(Term **t, int col, int row, char *font_name, THooks *hooks);
+void tresize(Term *t, int, int);
+void tsetdirtattr(Term *t, int);
+void ttyhangup(pid_t);
+int ttynew(Term *t, pid_t *, char *, char *, char *, char **);
+size_t ttyread(Term *t);
 
-void selclear(void);
+void selclear(Term *t);
 void selinit(void);
-void selstart(int, int, int);
-void selextend(int, int, int, int);
-int selected(int, int);
-char *getsel(void);
+void selstart(Term *t, int, int, int);
+void selextend(Term *t, int, int, int, int);
+int selected(Term *t, int, int);
+char *getsel(Term *t);
 
 size_t utf8encode(Rune, char *);
 
@@ -192,7 +197,7 @@ struct rgb24 rgb24_from_index(unsigned int index);
 
 //////
 
-int twrite(const char *, int, int);
+int twrite(Term *t, const char *, int, int);
 RLine *rline_new(size_t n_glyphs, uint64_t line_id);
 void rline_free(RLine **rline);
 // insert a glpyh before the index
@@ -200,10 +205,17 @@ void rline_insert_glyph(RLine *rline, size_t idx, Glyph g);
 // set a glyph to be something else
 void rline_set_glyph(RLine *rline, size_t idx, Glyph g);
 
+void tunrender(Term *t);
 void trender(
-    cairo_t *cr, double w, double h, double x1, double y1, double x2, double y2
+    Term *t,
+    cairo_t *cr,
+    double w,
+    double h,
+    double x1,
+    double y1,
+    double x2,
+    double y2
 );
-void tunrender(void);
 void rline_unrender(RLine *rline);
 
 /*

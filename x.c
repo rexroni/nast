@@ -30,14 +30,14 @@ static void die_on_ttywrite(const char *buf, size_t len){
 typedef struct {
     uint mod;
     KeySym keysym;
-    void (*func)(const Arg *);
+    void (*func)(Term *t, const Arg *);
     const Arg arg;
 } Shortcut;
 
 typedef struct {
     uint mod;
     uint button;
-    void (*func)(const Arg *);
+    void (*func)(Term *t, const Arg *);
     const Arg arg;
     uint  release;
 } MouseShortcut;
@@ -60,11 +60,11 @@ typedef struct {
 static void clipcopy(const Arg *);
 static void clippaste(const Arg *);
 static void numlock(const Arg *);
-static void selpaste(const Arg *);
+static void selpaste(Term *t, const Arg *);
 static void zoom(const Arg *);
 static void zoomabs(const Arg *);
 static void zoomreset(const Arg *);
-static void ttysend(const Arg *);
+static void ttysend(Term *t, const Arg *);
 
 /* config.h for applying patches and the configuration. */
 #include "config.h"
@@ -285,7 +285,7 @@ clippaste(const Arg *dummy)
 }
 
 void
-selpaste(const Arg *dummy)
+selpaste(Term *t, const Arg *dummy)
 {
     XConvertSelection(xw.dpy, XA_PRIMARY, xsel.xtarget, XA_PRIMARY,
             xw.win, CurrentTime);
@@ -328,7 +328,7 @@ zoomreset(const Arg *arg)
 }
 
 void
-ttysend(const Arg *arg)
+ttysend(Term *t, const Arg *arg)
 {
     die_on_ttywrite(arg->s, strlen(arg->s));
 }

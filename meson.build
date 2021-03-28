@@ -13,7 +13,7 @@ deps = [
 
 executable(
   'nast',
-  ['nast.c', 'x.c', 'render.c', 'writable.c'],
+  ['nast.c', 'render.c', 'writable.c'],
   # include_directories: incdir,
   dependencies: deps
 )
