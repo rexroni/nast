@@ -645,6 +645,16 @@ ttyread(Term *t)
     return ret;
 }
 
+bool
+t_isset_crlf(Term *t){
+    return IS_SET(t, MODE_CRLF);
+}
+
+bool
+t_isset_echo(Term *t){
+    return IS_SET(t, MODE_ECHO);
+}
+
 int
 tattrset(Term *t, int attr)
 {

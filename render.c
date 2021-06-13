@@ -119,24 +119,17 @@ void set_clipboard(THooks *thooks, char *buf, size_t len){
     die("set_clipboard() not handled\n");
 }
 
-
-#define MODE_ECHO 1 << 0;
-#define MODE_CLRF 1 << 1;
-
-// TODO: not this.
-#define IS_SET(arg) TRUE
-
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
     if(!g->write_pending){
         g->write_pending = TRUE;
         g_io_add_watch(g->wr_ttychan, G_IO_OUT, tty_io, g);
     }
 
-    if(may_echo && IS_SET(MODE_ECHO)) {
+    if(may_echo && t_isset_echo(g->term)) {
         twrite(g->term, s, n, 1);
     }
 
-    if(!IS_SET(MODE_CRLF)){
+    if(!t_isset_crlf(g->term)){
         writable_add_bytes(&g->writable, s, n);
     }else{
         // do an extra copy with the \r -> \r\n conversion

@@ -168,6 +168,9 @@ void ttyhangup(pid_t);
 int ttynew(Term *t, pid_t *, char *, char *, char *, char **);
 size_t ttyread(Term *t);
 
+bool t_isset_crlf(Term *t);
+bool t_isset_echo(Term *t);
+
 void selclear(Term *t);
 void selinit(void);
 void selstart(Term *t, int, int, int);
