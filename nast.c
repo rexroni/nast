@@ -165,6 +165,14 @@ struct Term {
     int icharset; /* selected charset for sequence */
     int *tabs;
     enum cursor_style cursor_style;
+
+    // buffer for ttyread
+    int cmdfd;
+    char ttyreadbuf[BUFSIZ];
+    size_t ttyreadbuflen;
+
+    // buffer for tcursor
+    TCursor saved[2];
 };
 
 /* CSI Escape sequence structs */
@@ -255,7 +263,6 @@ static Selection sel;
 static CSIEscape csiescseq;
 static STREscape strescseq;
 static int iofd = 1;
-static int cmdfd;
 
 // get the physical index from an offset (a logical index)
 static inline size_t rlines_idx(Term *t, size_t idx){
@@ -579,12 +586,12 @@ ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
     }
 
     if (line) {
-        if ((cmdfd = open(line, O_RDWR)) < 0)
+        if ((t->cmdfd = open(line, O_RDWR)) < 0)
             die("open line '%s' failed: %s\n",
                 line, strerror(errno));
-        dup2(cmdfd, 0);
+        dup2(t->cmdfd, 0);
         stty(args);
-        return cmdfd;
+        return t->cmdfd;
     }
 
     /* seems to work fine on linux, openbsd and freebsd */
@@ -617,30 +624,29 @@ ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
             die("pledge\n");
 #endif
         close(s);
-        cmdfd = m;
+        t->cmdfd = m;
         break;
     }
-    return cmdfd;
+    return t->cmdfd;
 }
 
 size_t
 ttyread(Term *t)
 {
-    static char buf[BUFSIZ];
-    static int buflen = 0;
-    int written;
-    int ret;
-
     /* append read bytes to unprocessed bytes */
-    if ((ret = read(cmdfd, buf+buflen, LEN(buf)-buflen)) < 0)
-        die("couldn't read from shell: %s\n", strerror(errno));
-    buflen += ret;
+    ssize_t ret = read(
+        t->cmdfd,
+        t->ttyreadbuf+t->ttyreadbuflen,
+        LEN(t->ttyreadbuf)-t->ttyreadbuflen
+    );
+    if(ret < 0) die("couldn't read from tty: %s\n", strerror(errno));
+    t->ttyreadbuflen += ret;
 
-    written = twrite(t, buf, buflen, 0);
-    buflen -= written;
+    size_t written = twrite(t, t->ttyreadbuf, t->ttyreadbuflen, 0);
+    t->ttyreadbuflen -= written;
     /* keep any uncomplete utf8 char for the next call */
-    if (buflen > 0)
-        memmove(buf, buf + written, buflen);
+    if (t->ttyreadbuflen > 0)
+        memmove(t->ttyreadbuf, t->ttyreadbuf + written, t->ttyreadbuflen);
 
     return ret;
 }
@@ -707,14 +713,13 @@ tfulldirt(Term *t)
 void
 tcursor(Term *t, int mode)
 {
-    static TCursor c[2];
     int alt = IS_SET(t, MODE_ALTSCREEN);
 
     if (mode == CURSOR_SAVE) {
-        c[alt] = t->c;
+        t->saved[alt] = t->c;
     } else if (mode == CURSOR_LOAD) {
-        t->c = c[alt];
-        tmoveto(t, c[alt].x, c[alt].y);
+        t->c = t->saved[alt];
+        tmoveto(t, t->saved[alt].x, t->saved[alt].y);
     }
 }
 
