@@ -337,8 +337,13 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 
             case GDK_KEY_KP_Enter:  // not appkey mode
             case GDK_KEY_Return:
-                ttywrite(g, "\n", 1, 0);
+                ttywrite(g, "\r", 1, 0);
                 gtk_widget_queue_draw(g->darea);
+                return TRUE;
+
+            // escape key
+            case GDK_KEY_Escape:
+                ttywrite(g, "\x1b", 1, 0);
                 return TRUE;
 
             // arrow keys
@@ -357,7 +362,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 return TRUE;
         }
 
-        printf("unhandled keypress! (%c)\n", event_key->keyval);
+        printf("unhandled keypress! (%d)\n", event_key->keyval);
     }
 
     return FALSE;
