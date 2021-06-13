@@ -117,9 +117,18 @@ typedef struct {
 
 typedef Glyph* Line;
 
+// format overrides alter how an rline renders without altering the content
+typedef struct {
+    // -1 for 'not present'
+    int cursor;
+    int sel_first;
+    int sel_last;
+} fmt_overrides_t;
+
 // render line, one line of rendered text
 typedef struct {
     cairo_surface_t *srfc;
+    fmt_overrides_t last_ovr;
     Glyph *glyphs;
     size_t n_glyphs;
     // consecutive physical lines of matching line_id form a logical line.

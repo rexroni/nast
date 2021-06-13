@@ -1042,6 +1042,8 @@ tclearregion_abs(Term *t, int x1, int y1, int x2, int y2)
             // if (selected(t, x, y))
             //     selclear(t);
             rline->glyphs[x] = (Glyph){
+                // default rune is ' ' so that cursor-on-empty-space works
+                .u = ' ',
                 .mode = ATTR_NORENDER,
                 .fg = t->c.attr.fg,
                 .bg = t->c.attr.bg,
@@ -2520,7 +2522,8 @@ RLine *rline_new(size_t n_glyphs, uint64_t line_id){
     Glyph *glyphs = xmalloc(sizeof(*glyphs) * n_glyphs);
     *rline = (RLine){.glyphs=glyphs, .n_glyphs=n_glyphs, .line_id=line_id};
     for(size_t i = 0; i < rline->n_glyphs; i++){
-        rline->glyphs[i] = (Glyph){ .mode = ATTR_NORENDER };
+        // default rune is ' ' so that cursor-on-empty-space works
+        rline->glyphs[i] = (Glyph){ .u = ' ', .mode = ATTR_NORENDER };
     }
     return rline;
 }
@@ -2542,6 +2545,42 @@ RLine *tnew_rline(Term *t, uint64_t line_id, size_t cols){
     return out;
 }
 
+static fmt_overrides_t t_get_fmt_override(Term *t, int y_abs){
+    int cursor = -1;
+    if(term2abs(t, t->c.y) == y_abs){
+        cursor = t->c.x;
+    }
+    return (fmt_overrides_t){
+        .cursor = cursor,
+        // we don't support selections yet
+        .sel_first = -1,
+        .sel_last = -1,
+    };
+}
+
+static bool ovr_eq(fmt_overrides_t a, fmt_overrides_t b){
+    return memcmp(&a, &b, sizeof(a)) == 0;
+}
+
+static Glyph calc_fmt(fmt_overrides_t ovr, Glyph g, size_t x){
+    if(ovr.sel_first > -1 && ovr.sel_last > -1){
+        // selection reverses its bg/fg
+        if(x >= (size_t)ovr.sel_first && x <= (size_t)ovr.sel_last){
+            struct rgb24 old_fg = g.fg;
+            g.fg = g.bg;
+            g.bg = old_fg;
+        }
+    }
+    if(ovr.cursor > -1 && x == (size_t)ovr.cursor){
+        // white fg, bright red bg
+        g.fg = rgb24_from_index(7);
+        g.bg = rgb24_from_index(9);
+        // disable NORENDER
+        g.mode &= ~ATTR_NORENDER;
+    }
+    return g;
+}
+
 // "render context"
 typedef struct {
     double grid_w;
@@ -2558,10 +2597,12 @@ double rline_subrender(
     PangoLayout *layout,
     double x,
     size_t start,
-    size_t end
+    size_t end,
+    // fmt is provided separately, since it may be overridden
+    Glyph fmt
 ){
     // skip NORENDER chunks
-    if(rline->glyphs[start].mode & ATTR_NORENDER){
+    if(fmt.mode & ATTR_NORENDER){
         return x + rctx.grid_w * (end - start);
     }
     // expand glyphs back into utf8 for pango
@@ -2576,14 +2617,14 @@ double rline_subrender(
 
     cairo_move_to(cr, x, 0);
     // draw the background with the background color from the first glyph
-    struct rgb24 rgb = rline->glyphs[start].bg;
+    struct rgb24 rgb = fmt.bg;
     cairo_set_source_rgb(cr, rgb.r / 255., rgb.g / 255., rgb.b / 255.);
     cairo_rectangle(cr, x, 0, rctx.grid_w * (end - start), rctx.grid_h);
     cairo_fill(cr);
 
     cairo_move_to(cr, x, 0);
     // write the text with the foreground color from the first glyph
-    rgb = rline->glyphs[start].fg;
+    rgb = fmt.fg;
     cairo_set_source_rgb(cr, rgb.r / 255., rgb.g / 255., rgb.b / 255.);
     pango_cairo_show_layout(cr, layout);
 
@@ -2595,9 +2636,17 @@ double rline_subrender(
 }
 
 
-void rline_render(RLine *rline, rctx_t rctx){
-    // handle the already-been-rendered case
-    if(rline->srfc) return;
+void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
+    // handle caching
+    if(rline->srfc){
+        if(ovr_eq(ovr, rline->last_ovr)){
+            // cached surface still valid
+            return;
+        }
+        // otherwise destroy it and rerender
+        rline_unrender(rline);
+    }
+    rline->last_ovr = ovr;
 
     rline->srfc = cairo_image_surface_create(
         CAIRO_FORMAT_RGB24, rctx.render_w, rctx.grid_h);
@@ -2612,20 +2661,21 @@ void rline_render(RLine *rline, rctx_t rctx){
     double x = 0;
 
     // break up the text into multiple chunks of common font settings
-    Glyph cur_fmt = rline->glyphs[0];
+    Glyph fmt = calc_fmt(ovr, rline->glyphs[0], 0);
     size_t start = 0;
     size_t i;
     for(i = 1; i < rline->n_glyphs; i++){
-        if(!format_eq(cur_fmt, rline->glyphs[i])){
+        Glyph next_fmt = calc_fmt(ovr, rline->glyphs[i], i);
+        if(!format_eq(fmt, next_fmt)){
             // found a different format, i-1 was the end of the render box
-            x = rline_subrender(rline, rctx, cr, layout, x, start, i);
+            x = rline_subrender(rline, rctx, cr, layout, x, start, i, fmt);
             start = i;
             // i is the beginning of the next format
-            cur_fmt = rline->glyphs[i];
+            fmt = next_fmt;
         }
     }
     // render the final chunk
-    rline_subrender(rline, rctx, cr, layout, x, start, rline->n_glyphs);
+    rline_subrender(rline, rctx, cr, layout, x, start, rline->n_glyphs, fmt);
     g_object_unref(layout);
     cairo_destroy(cr);
 }
@@ -2707,18 +2757,21 @@ void trender(
         }
     }
 
+    // make a render context
+    rctx_t rctx = {
+        .grid_w = t->grid_w,
+        .grid_h = t->grid_h,
+        .render_w = t->render_w,
+        .desc = t->desc,
+    };
+
     for(size_t i = 0; i < t->row; i++){
-        // make a render context
-        rctx_t rctx = {
-            .grid_w = t->grid_w,
-            .grid_h = t->grid_h,
-            .render_w = t->render_w,
-            .desc = t->desc,
-        };
-        // get the line at this index
-        RLine *rline = get_rline(t, view2abs(t, i));
+        size_t y_abs = view2abs(t, i);
+        RLine *rline = get_rline(t, y_abs);
+        // capture any format overrides
+        fmt_overrides_t ovr = t_get_fmt_override(t, y_abs);
         // render this line
-        rline_render(rline, rctx);
+        rline_render(rline, rctx, ovr);
         // draw this line onto the cairo surface
         rline_draw(rline, rctx, cr, i);
     }
