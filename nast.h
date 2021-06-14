@@ -115,7 +115,7 @@ typedef struct {
     struct rgb24 bg; /* background  */
 } Glyph;
 
-typedef Glyph* Line;
+// typedef Glyph* Line;
 
 // format overrides alter how an rline renders without altering the content
 typedef struct {

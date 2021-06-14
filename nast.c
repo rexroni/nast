@@ -18,7 +18,6 @@
 #include <wchar.h>
 
 #include "nast.h"
-#include "win.h"
 
 #if   defined(__linux)
  #include <pty.h>
@@ -150,9 +149,6 @@ struct Term {
     // callbacks
     THooks *hooks;
 
-    Line *line;   /* screen */
-    Line *alt;    /* alternate screen */
-    int *dirty;   /* dirtyness of lines */
     TCursor c;    /* cursor */
     int ocx;      /* old cursor col */
     int ocy;      /* old cursor row */
@@ -224,7 +220,7 @@ static void tdeletechar(Term *t, int);
 static void tdeleteline(Term *t, int);
 static void tinsertblank(Term *t, int);
 static void tinsertblankline(Term *t, int);
-static int tlinelen(Term *t, int);
+// static int tlinelen(Term *t, int);
 static void tmoveto(Term *t, int, int);
 static void tnewline(Term *t, int, bool);
 static void tputtab(Term *t, int);
@@ -474,19 +470,20 @@ base64dec(const char *src, size_t *len)
     return result;
 }
 
-int
-tlinelen(Term *t, int y)
-{
-    int i = t->col;
-
-    if (t->line[y][i - 1].mode & ATTR_WRAP)
-        return i;
-
-    while (i > 0 && t->line[y][i - 1].u == ' ')
-        --i;
-
-    return i;
-}
+// int
+// tlinelen(Term *t, int y)
+// {
+//     int i = t->col;
+//
+//     die("tlinelen!\n");
+//     // if (t->line[y][i - 1].mode & ATTR_WRAP)
+//     //     return i;
+//
+//     // while (i > 0 && t->line[y][i - 1].u == ' ')
+//     //     --i;
+//
+//     return i;
+// }
 
 void
 die(const char *errstr, ...)
@@ -664,14 +661,15 @@ t_isset_echo(Term *t){
 int
 tattrset(Term *t, int attr)
 {
-    int i, j;
+    die("tattrset!\n");
+    // int i, j;
 
-    for (i = 0; i < t->row-1; i++) {
-        for (j = 0; j < t->col-1; j++) {
-            if (t->line[i][j].mode & attr)
-                return 1;
-        }
-    }
+    // for (i = 0; i < t->row-1; i++) {
+    //     for (j = 0; j < t->col-1; j++) {
+    //         if (t->line[i][j].mode & attr)
+    //             return 1;
+    //     }
+    // }
 
     return 0;
 }
@@ -692,16 +690,17 @@ tsetdirt(Term *t, int top, int bot)
 void
 tsetdirtattr(Term *t, int attr)
 {
-    int i, j;
+    die("tsetdirtattr!\n");
+    // int i, j;
 
-    for (i = 0; i < t->row-1; i++) {
-        for (j = 0; j < t->col-1; j++) {
-            if (t->line[i][j].mode & attr) {
-                tsetdirt(t, i, i);
-                break;
-            }
-        }
-    }
+    // for (i = 0; i < t->row-1; i++) {
+    //     for (j = 0; j < t->col-1; j++) {
+    //         if (t->line[i][j].mode & attr) {
+    //             tsetdirt(t, i, i);
+    //             break;
+    //         }
+    //     }
+    // }
 }
 
 void
@@ -890,9 +889,6 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
     t->row = row;
     t->col = col;
 
-    t->line = xrealloc(t->line, row * sizeof(Line));
-    t->alt  = xrealloc(t->alt,  row * sizeof(Line));
-    t->dirty = xrealloc(t->dirty, row * sizeof(*t->dirty));
     t->tabs = xrealloc(t->tabs, col * sizeof(*t->tabs));
 
     tscrollregion(t, 0, row-1);
@@ -907,8 +903,6 @@ tswapscreen(Term *t)
     // TODO: support altscreen
     //Line *tmp = t->line;
 
-    //t->line = t->alt;
-    //t->alt = tmp;
     t->mode ^= MODE_ALTSCREEN;
     tfulldirt(t);
 }
@@ -1013,19 +1007,15 @@ tsetchar(Term *t, Rune u, Glyph *attr, int x, int y)
        BETWEEN(u, 0x41, 0x7e) && vt100_0[u - 0x41])
         utf8decode(vt100_0[u - 0x41], &u, UTF_SIZ);
 
-    if (t->line[y][x].mode & ATTR_WIDE) {
-        if (x+1 < t->col) {
-            t->line[y][x+1].u = ' ';
-            t->line[y][x+1].mode &= ~ATTR_WDUMMY;
-        }
-    } else if (t->line[y][x].mode & ATTR_WDUMMY) {
-        t->line[y][x-1].u = ' ';
-        t->line[y][x-1].mode &= ~ATTR_WIDE;
-    }
-
-    t->dirty[y] = 1;
-    t->line[y][x] = *attr;
-    t->line[y][x].u = u;
+    // if (t->line[y][x].mode & ATTR_WIDE) {
+    //     if (x+1 < t->col) {
+    //         t->line[y][x+1].u = ' ';
+    //         t->line[y][x+1].mode &= ~ATTR_WDUMMY;
+    //     }
+    // } else if (t->line[y][x].mode & ATTR_WDUMMY) {
+    //     t->line[y][x-1].u = ' ';
+    //     t->line[y][x-1].mode &= ~ATTR_WIDE;
+    // }
 }
 
 void
@@ -1805,16 +1795,20 @@ tdumpsel(Term *t)
 void
 tdumpline(Term *t, int n)
 {
+    die("tdumpline");
     char buf[UTF_SIZ];
     Glyph *bp, *end;
+    (void)bp;
+    (void)end;
+    (void)buf;
 
-    bp = &t->line[n][0];
-    end = &bp[MIN(tlinelen(t, n), t->col) - 1];
-    if (bp != end || bp->u != ' ') {
-        for ( ;bp <= end; ++bp)
-            tprinter(t, buf, utf8encode(bp->u, buf));
-    }
-    tprinter(t, "\n", 1);
+    // bp = &t->line[n][0];
+    // end = &bp[MIN(tlinelen(t, n), t->col) - 1];
+    // if (bp != end || bp->u != ' ') {
+    //     for ( ;bp <= end; ++bp)
+    //         tprinter(t, buf, utf8encode(bp->u, buf));
+    // }
+    // tprinter(t, "\n", 1);
 }
 
 void
@@ -2525,9 +2519,6 @@ tresize(Term *t, int col, int row)
     // TODO: deal with altscreen
 
     /* resize to new height */
-    t->line = xrealloc(t->line, row * sizeof(Line));
-    t->alt  = xrealloc(t->alt,  row * sizeof(Line));
-    t->dirty = xrealloc(t->dirty, row * sizeof(*t->dirty));
     t->tabs = xrealloc(t->tabs, col * sizeof(*t->tabs));
 
     // fix tabs
