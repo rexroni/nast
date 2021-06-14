@@ -2268,25 +2268,115 @@ twrite(Term *t, const char *buf, int buflen, int show_ctrl)
     return n;
 }
 
+/* cursor reflow logic: as we reflow lines, we need to reflow the cursor's
+   position as well; so keep track of the rline whose position is under the
+   cursor, and figure out which y that points us to later */
+typedef struct {
+    TCursor old;
+    const RLine *old_rline;
+    const RLine *new_rline;
+    int new_abs_y;
+    TCursor new;
+    bool done;
+} cursor_reflow_t;
+
+cursor_reflow_t cursor_reflow_new(TCursor old, const RLine *old_rline){
+    // new is derived from old with clean x and WRAPNEXT
+    TCursor new = old;
+    new.x = 0;
+    new.state &= ~CURSOR_WRAPNEXT;
+    return(cursor_reflow_t){
+        .old = old,
+        .old_rline = old_rline,
+        .new_abs_y = 0,
+        .new = new,
+    };
+}
+
+void cursor_reflow_copyable_glyph(
+    cursor_reflow_t *r,
+    const RLine *old,
+    size_t old_x /*j*/,
+    size_t new_x /*glyph_idx*/,
+    const RLine *new,
+    size_t y_abs
+){
+    // wrong line?
+    if(old != r->old_rline) return;
+    // wrong column?
+    if(old_x != r->old.x) return;
+
+    r->new_rline = new;
+    r->new.x = new_x;
+    r->new_abs_y = y_abs;
+    // if the cursor was set to WRAPNEXT, bump x if it's safe to
+    if(r->old.state & CURSOR_WRAPNEXT){
+        if(r->new.x + 1 < new->n_glyphs){
+            /* in the case that WRAPNEXT was set and the cursor
+               position after reflowing is in the middle of the
+               line, just bump the cursor forward a little bit */
+            r->new.x++;
+        }else{
+            /* in the corner case where WRAPNEXT was set, but after
+               resizing the cursor position is still right on the
+               edge of the screen, just set WRAPNEXT again */
+            r->new.state |= CURSOR_WRAPNEXT;
+        }
+    }
+
+    r->done = true;
+}
+
+void cursor_reflow_noncopyable_glyph(
+    cursor_reflow_t *r,
+    const RLine *old,
+    size_t new_x /*glyph_idx*/,
+    const RLine *new,
+    size_t y_abs
+){
+    // wrong line?
+    if(old != r->old_rline) return;
+    // already reflowed?
+    if(r->done) return;
+
+    // just place the cursor at the end of the line to support 99.99% of cases
+    r->new.x = new_x;
+    if(r->new.x >= new->n_glyphs){
+        /* if placing the cursor after the last glyph would place it
+           off of the screen, place it on top of the last glyph and
+           set WRAPNEXT */
+        r->new.x = new->n_glyphs - 1;
+        r->new.state |= CURSOR_WRAPNEXT;
+    }
+    r->new_abs_y = y_abs;
+
+    r->done = true;
+}
+
+
+size_t cursor_reflow_lines_to_trim(cursor_reflow_t *r, size_t rlines_len, int row){
+    /* is the distance between our y_abs the bottom of the screen smaller than
+       or equal to the number of rows in the screen? */
+    if(rlines_len - r->new_abs_y < row) return 0;
+
+    /* So suppose we're on the 0th row of a 40-row terminal, and we resize to
+       a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines. */
+    return rlines_len - r->new_abs_y - row;
+}
+
+TCursor cursor_reflow_done(cursor_reflow_t *r, Term *t){
+    r->new.y = abs2term(t, r->new_abs_y);
+    return r->new;
+}
+
 void
 tresize(Term *t, int col, int row)
 {
     int old_col = t->col;
 
-    /* cursor reflow logic: as we reflow lines, we need to reflow the cursor's
-       position as well; so keep track of the rline whose position is under
-       the cursor, and figure out which y that points us to later */
-    RLine *old_cursor_rline = get_cursor_rline(t);
-    int old_cursor_x = t->c.x;
-    int new_cursor_x = 0;
-    int new_cursor_abs_y = 0;
-    RLine *new_cursor_rline = NULL;
-    if(old_cursor_rline->line_id == 0)
-        die("unsure how to handle old_cursor_line_id == 0\n");
-
-    // cursor reflow: reset CURSOR_WRAPNEXT, but remember if it was set
-    bool old_wrapnext = t->c.state & CURSOR_WRAPNEXT;
-    t->c.state &= ~CURSOR_WRAPNEXT;
+    cursor_reflow_t cursor_reflow = cursor_reflow_new(
+        t->c, get_cursor_rline(t)
+    );
 
     int *bp;
 
@@ -2366,41 +2456,16 @@ tresize(Term *t, int col, int row)
             new->glyphs[glyph_idx] = g;
             // printf("%c (%lu)\n", (char)g.u, new->line_id);
             // cursor reflow: cursor-over-copyable-glyph case
-            if(old == old_cursor_rline && old_cursor_x == j){
-                new_cursor_rline = new;
-                new_cursor_x = glyph_idx;
-                new_cursor_abs_y = t->rlines_len - 1;
-                // if the cursor was set to WRAPNEXT, bump x if it's safe to
-                if(old_wrapnext){
-                    if(new_cursor_x + 1 < new->n_glyphs){
-                        /* in the case that WRAPNEXT was set and the cursor
-                           position after reflowing is in the middle of the
-                           line, just bump the cursor forward a little bit */
-                        new_cursor_x++;
-                    }else{
-                        /* in the corner case where WRAPNEXT was set, but after
-                           resizing the cursor position is still right on the
-                           edge of the screen, just set WRAPNEXT again */
-                        t->c.state |= CURSOR_WRAPNEXT;
-                    }
-                }
-            }
+            cursor_reflow_copyable_glyph(
+                &cursor_reflow, old, j, glyph_idx, new, t->rlines_len - 1
+            );
             glyph_idx++;
         }
         /* cursor reflow: cursor-not-over-copyable-glyph case: just place the
            cursor at the end of the line to support 99.99% of cases */
-        if(old == old_cursor_rline && new_cursor_rline == NULL){
-            new_cursor_rline = new;
-            new_cursor_x = glyph_idx;
-            if(new_cursor_x >= new->n_glyphs){
-                /* if placing the cursor after the last glyph would place it
-                   off of the screen, place it on top of the last glyph and
-                   set WRAPNEXT */
-                new_cursor_x = new->n_glyphs - 1;
-                t->c.state |= CURSOR_WRAPNEXT;
-            }
-            new_cursor_abs_y = t->rlines_len - 1;
-        }
+        cursor_reflow_noncopyable_glyph(
+            &cursor_reflow, old, glyph_idx, new, t->rlines_len - 1
+        );
 
     cu_rline:
         rline_free(&old);
@@ -2446,15 +2511,15 @@ tresize(Term *t, int col, int row)
        screen after the resize anyway.
 
        So suppose we're on the 0th row of a 40-row terminal, and we resize to
-       a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines. */
-    size_t y_max = t->rlines_len - 1;
-    if(y_max - new_cursor_abs_y > row){
-        size_t n_extras = y_max - new_cursor_abs_y - row;
-        for(size_t i = 0; i < n_extras; i++){
-            RLine *rline = get_rline(t, t->rlines_len-- - 1);
-            rline_free(&rline);
-        }
-        // no change to x or absolute y position
+       a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines.
+
+       Note that there is no change to x or absolute y position as a result. */
+    size_t n_extras = cursor_reflow_lines_to_trim(
+        &cursor_reflow, t->rlines_len, row
+    );
+    for(size_t i = 0; i < n_extras; i++){
+        RLine *rline = get_rline(t, t->rlines_len-- - 1);
+        rline_free(&rline);
     }
 
     // TODO: deal with altscreen
@@ -2481,8 +2546,7 @@ tresize(Term *t, int col, int row)
     t->row = row;
 
     // set the reflowed cursor position
-    t->c.x = new_cursor_x;
-    t->c.y = abs2term(t, new_cursor_abs_y);
+    t->c = cursor_reflow_done(&cursor_reflow, t);
 
     tscrollregion(t, 0, row-1);
 
