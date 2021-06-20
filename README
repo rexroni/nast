@@ -60,13 +60,18 @@ System Architecture
               key inputs are encoded over the application/backend interface
 
     Example sequence: pressing the 'q' key:
-        - window manager tells backend shift+2 is hit (via B.)
+        - window manager tells backend 'q' is hit (via B.)
         - backend tells the application by writing a 'q' to the tty (via A.)
         - application writes 'q' key back to its stdout (via A.)
         - backend reads 'q' on tty, passes it to libnast (via C.)
         - libnast updates the terminal state, updates canvas
         - libnast tells backend canvas is updated
         - backend notifies window manager to redraw
+
+        Note that for more complex sequences, what the backend tells the
+        application might not match what the application writes to its stdout.
+        To capture exactly what the application normally receives from a
+        terminal emulator, start up ./raw_inputs and type something.
 
     Example sequence: Application calls the Device Status Report
         - application writes '\x1b[6n' to its stdout (the tty)

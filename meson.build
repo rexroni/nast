@@ -23,3 +23,8 @@ executable(
   ['test_writable.c'],
   # include_directories: incdir,
 )
+
+executable(
+  'raw_inputs',
+  ['raw_inputs.c'],
+)
