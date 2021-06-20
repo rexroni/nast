@@ -96,7 +96,7 @@ typedef struct {
     Glyph attr; /* current char attributes */
     // position in line
     int x;
-    // y cursor position, relative to the view.
+    // y cursor position, in terminal coordinates.
     int y;
     char state;
 } TCursor;
@@ -119,6 +119,15 @@ typedef struct {
     int alt;
 } Selection;
 
+typedef struct {
+    RLine **rlines;
+    // ring buffer semantics
+    size_t cap;       // cap = item length of the physical buffer
+    size_t start;     // the oldest line in memory
+    size_t len;       // number of lines in memory
+    uint64_t line_id; // current line UID
+} Screen;
+
 /* Internal representation of the screen */
 struct Term {
     int row;      /* nb row */
@@ -133,15 +142,12 @@ struct Term {
     double render_w;
     double render_h;
 
-    RLine **rlines;
-    // ring buffer semantics
-    size_t rlines_cap;   // cap = item length of the physical buffer
-    size_t rlines_start; // the oldest line in memory
-    size_t rlines_len;     // number of lines in memory
-    uint64_t line_id;    // current line UID
-
-    // how many lines we have forgotten in total
-    size_t forgotten;
+    // main screen
+    Screen main;
+    // altscreen
+    Screen alt;
+    // points to either .main or .alt
+    Screen *scr;
 
     // how many unrendered lines are below the window
     size_t scroll;
@@ -226,16 +232,14 @@ static void tnewline(Term *t, int, bool);
 static void tputtab(Term *t, int);
 static void tputc(Term *t, Rune);
 static void treset(Term *t);
-static RLine *tnew_rline(Term *t, uint64_t line_id, size_t cols);
+static RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols);
 static void tscrollup(Term *t, int, int);
 static void tscrolldown(Term *t, int, int);
 static void tsetattr(Term *t, int *, int);
 static void tsetchar(Term *t, Rune, Glyph *, int, int);
-static void tsetdirt(Term *t, int, int);
 static void tswapscreen(Term *t);
 static void tsetmode(Term *t, int, int, int *, int);
 // static int twrite(t, const char *, int, int);
-static void tfulldirt(Term *t);
 static void tcontrolcode(Term *t, uchar );
 static void tdectest(Term *t, char );
 static void tdefutf8(Term *t, char);
@@ -261,38 +265,44 @@ static STREscape strescseq;
 static int iofd = 1;
 
 // get the physical index from an offset (a logical index)
-static inline size_t rlines_idx(Term *t, size_t idx){
-    return (t->rlines_start + idx) % (t->rlines_cap + 1);
+static inline size_t rlines_idx(Screen *scr, size_t idx){
+    return (scr->start + idx) % (scr->cap + 1);
 }
 
-static inline RLine *get_rline(Term *t, size_t idx){
-    return t->rlines[rlines_idx(t, idx)];
+static inline RLine *get_rline(Screen *scr, size_t idx){
+    return scr->rlines[rlines_idx(scr, idx)];
 }
 
 // convert absolute index to a view index, or what is currently in scroll view
 static inline size_t abs2view(Term *t, size_t idx){
-    return t->rlines_len - t->row - t->scroll + idx;
+    return t->scr->len - t->row - t->scroll + idx;
 }
 
 static inline size_t view2abs(Term *t, size_t idx){
-    return idx + (t->rlines_len- t->row - t->scroll);
+    return idx + (t->scr->len - t->row - t->scroll);
 }
 
 // convert absolute index to a terminal index, or the bottom t->row rows
+static inline size_t abs2term_ex(Screen *scr, size_t idx, int t_row){
+    return idx - (scr->len - t_row);
+}
 static inline size_t abs2term(Term *t, size_t idx){
-    return idx - (t->rlines_len - t->row);
+    return abs2term_ex(t->scr, idx, t->row);
 }
 
+static inline size_t term2abs_ex(Screen *scr, size_t idx, int t_row){
+    return idx + (scr->len - t_row);
+}
 static inline size_t term2abs(Term *t, size_t idx){
-    return idx + (t->rlines_len - t->row);
+    return term2abs_ex(t->scr, idx, t->row);
 }
 
-static inline uint64_t new_line_id(Term *t){
-    return ++t->line_id;
+static inline uint64_t new_line_id(Screen *scr){
+    return ++scr->line_id;
 }
 
 static inline RLine *get_cursor_rline(Term *t){
-    return get_rline(t, term2abs(t, t->c.y));
+    return get_rline(t->scr, term2abs(t, t->c.y));
 }
 
 static uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
@@ -675,41 +685,6 @@ tattrset(Term *t, int attr)
 }
 
 void
-tsetdirt(Term *t, int top, int bot)
-{
-    int i;
-
-    LIMIT(top, 0, t->row-1);
-    LIMIT(bot, 0, t->row-1);
-
-    for (i = top; i <= bot; i++){
-        rline_unrender(get_rline(t, term2abs(t, i)));
-    }
-}
-
-void
-tsetdirtattr(Term *t, int attr)
-{
-    die("tsetdirtattr!\n");
-    // int i, j;
-
-    // for (i = 0; i < t->row-1; i++) {
-    //     for (j = 0; j < t->col-1; j++) {
-    //         if (t->line[i][j].mode & attr) {
-    //             tsetdirt(t, i, i);
-    //             break;
-    //         }
-    //     }
-    // }
-}
-
-void
-tfulldirt(Term *t)
-{
-    tsetdirt(t, 0, t->row-1);
-}
-
-void
 tcursor(Term *t, int mode)
 {
     int alt = IS_SET(t, MODE_ALTSCREEN);
@@ -768,7 +743,7 @@ treset(Term *t)
     for (i = 0; i < 2; i++) {
         tmoveto(t, 0, 0);
         tcursor(t, CURSOR_SAVE);
-        tclearregion_abs(t, 0, 0, t->col-1, t->rlines_len - 1);
+        tclearregion_abs(t, 0, 0, t->col-1, t->scr->len - 1);
         tswapscreen(t);
     }
 }
@@ -871,20 +846,33 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
         die("invalid font\n");
     }
 
-    // allocate history
-    t->rlines_cap = RLINES_LIMIT - 1;
-    size_t nbytes = (t->rlines_cap + 1) * sizeof(*t->rlines);
-    t->rlines = xmalloc(nbytes);
+    // allocate history (primary screen, lots of scrollback)
+    t->main.cap = RLINES_LIMIT - 1;
+    size_t nbytes = (t->main.cap + 1) * sizeof(*t->main.rlines);
+    t->main.rlines = xmalloc(nbytes);
     // all lines start empty
-    memset(t->rlines, 0, nbytes);
-
+    memset(t->main.rlines, 0, nbytes);
     // start with the first window of lines allocated
     for(size_t i = 0; i < row; i++){
-        t->rlines[rlines_idx(t, t->rlines_len++)] =
+        t->main.rlines[rlines_idx(&t->main, t->main.len++)] =
             rline_new(col, 0);
     }
     // the first line needs a real line id, since the cursor starts there
-    t->rlines[rlines_idx(t, 0)]->line_id = new_line_id(t);
+    t->main.rlines[rlines_idx(&t->main, 0)]->line_id = new_line_id(&t->main);
+
+    // allocate history (altscreen, zero scrollback)
+    t->alt.cap = row;
+    nbytes = (t->alt.cap + 1) * sizeof(*t->alt.rlines);
+    t->alt.rlines = xmalloc(nbytes);
+    memset(t->alt.rlines, 0, nbytes);
+    for(size_t i = 0; i < row; i++){
+        t->alt.rlines[rlines_idx(&t->alt, t->alt.len++)] =
+            rline_new(col, 0);
+    }
+    t->alt.rlines[rlines_idx(&t->alt, 0)]->line_id = new_line_id(&t->alt);
+
+    // start on main screen
+    t->scr = &t->main;
 
     t->row = row;
     t->col = col;
@@ -900,11 +888,14 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
 void
 tswapscreen(Term *t)
 {
-    // TODO: support altscreen
-    //Line *tmp = t->line;
-
+    if(t->mode & MODE_ALTSCREEN){
+        // switch to main
+        t->scr = &t->main;
+    }else{
+        // switch to alt
+        t->scr = &t->alt;
+    }
     t->mode ^= MODE_ALTSCREEN;
-    tfulldirt(t);
 }
 
 void
@@ -914,7 +905,7 @@ tnewline(Term *t, int first_col, bool continue_line)
     if(continue_line){
         line_id = get_cursor_rline(t)->line_id;
     }else{
-        line_id = new_line_id(t);
+        line_id = new_line_id(t->scr);
     }
 
     // move the cursor down a line
@@ -923,12 +914,12 @@ tnewline(Term *t, int first_col, bool continue_line)
     // do we need a new line?
     if(t->c.y == t->row){
         t->c.y--;
-        tnew_rline(t, line_id, t->col);
+        scr_new_rline(t->scr, line_id, t->col);
 
         // hold the scroll window in place, if needed and possible
         if(t->scroll){
             t->scroll++;
-            LIMIT(t->scroll, 0, t->rlines_len - t->row);
+            LIMIT(t->scroll, 0, t->scr->len - t->row);
         }
     }
 
@@ -1029,7 +1020,7 @@ tclearregion_abs(Term *t, int x1, int y1, int x2, int y2)
         temp = y1, y1 = y2, y2 = temp;
 
     for (y = y1; y <= y2; y++) {
-        RLine *rline = get_rline(t, y);
+        RLine *rline = get_rline(t->scr, y);
         rline_unrender(rline);
 
         for (x = x1; x <= x2; x++) {
@@ -1068,7 +1059,7 @@ tdeletechar(Term *t, int n)
     dst = t->c.x;
     src = t->c.x + n;
     size = t->col - src;
-    RLine *rline = get_rline(t, term2abs(t, t->c.y));
+    RLine *rline = get_rline(t->scr, term2abs(t, t->c.y));
 
     Glyph *glyphs = rline->glyphs;
     memmove(&glyphs[dst], &glyphs[src], size * sizeof(*glyphs));
@@ -1338,7 +1329,7 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
             case 1047:
                 alt = IS_SET(t, MODE_ALTSCREEN);
                 if (alt) {
-                    tclearregion_abs(t, 0, 0, t->col-1, t->rlines_len-1);
+                    tclearregion_abs(t, 0, 0, t->col-1, t->scr->len-1);
                 }
                 if (set ^ alt) /* set is always 1 or 0 */
                     tswapscreen(t);
@@ -2268,10 +2259,10 @@ twrite(Term *t, const char *buf, int buflen, int show_ctrl)
 typedef struct {
     TCursor old;
     const RLine *old_rline;
-    const RLine *new_rline;
     int new_abs_y;
     TCursor new;
     bool done;
+    bool invalid;
 } cursor_reflow_t;
 
 cursor_reflow_t cursor_reflow_new(TCursor old, const RLine *old_rline){
@@ -2295,12 +2286,13 @@ void cursor_reflow_copyable_glyph(
     const RLine *new,
     size_t y_abs
 ){
+    // already reflowed?
+    if(r->done) return;
     // wrong line?
     if(old != r->old_rline) return;
     // wrong column?
     if(old_x != r->old.x) return;
 
-    r->new_rline = new;
     r->new.x = new_x;
     r->new_abs_y = y_abs;
     // if the cursor was set to WRAPNEXT, bump x if it's safe to
@@ -2328,10 +2320,10 @@ void cursor_reflow_noncopyable_glyph(
     const RLine *new,
     size_t y_abs
 ){
-    // wrong line?
-    if(old != r->old_rline) return;
     // already reflowed?
     if(r->done) return;
+    // wrong line?
+    if(old != r->old_rline) return;
 
     // just place the cursor at the end of the line to support 99.99% of cases
     r->new.x = new_x;
@@ -2349,6 +2341,8 @@ void cursor_reflow_noncopyable_glyph(
 
 
 size_t cursor_reflow_lines_to_trim(cursor_reflow_t *r, size_t rlines_len, int row){
+    if(r->invalid) return 0;
+
     /* is the distance between our y_abs the bottom of the screen smaller than
        or equal to the number of rows in the screen? */
     if(rlines_len - r->new_abs_y < row) return 0;
@@ -2358,54 +2352,84 @@ size_t cursor_reflow_lines_to_trim(cursor_reflow_t *r, size_t rlines_len, int ro
     return rlines_len - r->new_abs_y - row;
 }
 
-TCursor cursor_reflow_done(cursor_reflow_t *r, Term *t){
-    r->new.y = abs2term(t, r->new_abs_y);
+// if new_abs_y-- won't be valid, mark the cursor_reflow as invalid
+void cursor_reflow_decrement_y(cursor_reflow_t *r){
+    if(!r->done){
+        // y_abs not set yet
+        return;
+    }
+    if(r->new_abs_y == 0){
+        r->invalid = true;
+        return;
+    }
+    r->new_abs_y--;
+    return;
+}
+
+void cursor_reflow_invalidate_if_lines_to_trim(
+    cursor_reflow_t *r, size_t rlines_len, int row
+){
+    if(cursor_reflow_lines_to_trim(r, rlines_len, row) > 0){
+        r->invalid = true;
+    }
+}
+
+TCursor cursor_reflow_done(cursor_reflow_t *r, Screen *scr, int row){
+    if(r->invalid){
+        // invalid cursors are just placed at 0,0
+        r->new.x = 0;
+        r->new.y = 0;
+    }else{
+        r->new.y = abs2term_ex(scr, r->new_abs_y, row);
+    }
     return r->new;
 }
 
-void
-tresize(Term *t, int col, int row)
-{
-    int old_col = t->col;
-
-    cursor_reflow_t cursor_reflow = cursor_reflow_new(
-        t->c, get_cursor_rline(t)
-    );
-
-    int *bp;
-
-    if (col < 1 || row < 1) {
-        fprintf(stderr, "tresize: error resizing to %dx%d\n", col, row);
-        return;
+static Screen reflow(
+    Screen old,
+    int old_col,
+    int row,
+    int col,
+    size_t new_cap,
+    cursor_reflow_t **crs,
+    size_t ncrs
+){
+    // any time cap is less than row, just artificially bump it up
+    if(new_cap < row){
+        fprintf(
+            stderr,
+            "reflow(new_cap=%zu, row=%d): overriding new_cap\n",
+            new_cap,
+            row
+        );
+        new_cap = row;
     }
 
-    tunrender(t);
-
-    // create duplicate rlines
-    RLine **old_rlines = t->rlines;
-    size_t old_len = t->rlines_len;
-    size_t old_start = t->rlines_start;
-    size_t nbytes = (t->rlines_cap + 1) * sizeof(*t->rlines);
-    t->rlines = xmalloc(nbytes);
+    // Start with the new_cap specified, and keep the line_id
+    // TODO: can we avoid keeping the line_id?
+    Screen new = {
+        .cap = new_cap,
+        .line_id = old.line_id,
+        .start = 0,
+        .len = 0,
+    };
+    size_t nbytes = (new.cap + 1) * sizeof(*new.rlines);
+    new.rlines = xmalloc(nbytes);
     // all lines start empty
-    memset(t->rlines, 0, nbytes);
-
-    // no lines allocated yet
-    t->rlines_start = 0;
-    t->rlines_len = 0;
+    memset(new.rlines, 0, nbytes);
 
     // the line_id of the current logical line from old_lines
     size_t old_line_id = 0;
-    // the current rline we are writing to
-    RLine *new = NULL;
+    // the current rline we are writing to ("n"ew)
+    RLine *n = NULL;
     size_t glyph_idx = 0;
 
     // {
     //     printf("PRECOPY:\n");
-    //     for(size_t i = 0; i < old_len; i++){
+    //     for(size_t i = 0; i < old.len; i++){
     //         // get the next old rline
-    //         size_t idx = (old_start + i) % (t->rlines_cap + 1);
-    //         RLine *old = old_rlines[idx];
+    //         size_t idx = (old.start + i) % (old.cap + 1);
+    //         RLine *old = old.rlines[idx];
     //         char utf8[4096];
     //         size_t utf8_len = 0;
     //         for(size_t j = 0; j < old->n_glyphs; j++){
@@ -2418,60 +2442,76 @@ tresize(Term *t, int col, int row)
 
     // printf("COPY:\n");
     // copy each old rline into a new rline
-    for(size_t i = 0; i < old_len; i++){
-        // get the next old rline
-        size_t idx = (old_start + i) % (t->rlines_cap + 1);
-        RLine *old = old_rlines[idx];
+    for(size_t i = 0; i < old.len; i++){
+        // get the next old rline ("o"ld)
+        size_t idx = (old.start + i) % (old.cap + 1);
+        RLine *o = old.rlines[idx];
         // ignore id=0 lines, which are the initial empty lines
-        if(!old->line_id){
+        if(!o->line_id){
             goto cu_rline;
         }
         // does this old_line have a different line_id than what we last saw?
-        if(!new || old_line_id != old->line_id){
-            new = tnew_rline(t, new_line_id(t), col);
+        if(!n || old_line_id != o->line_id){
+            if(new.len == new.cap){
+                // cursor reflow: decrement the stored y_abs values
+                for(size_t i = 0; i < ncrs; i++){
+                    cursor_reflow_decrement_y(crs[i]);
+                }
+            }
+            n = scr_new_rline(&new, new_line_id(&new), col);
             // printf("\\n\n");
             glyph_idx = 0;
-            old_line_id = old->line_id;
+            old_line_id = o->line_id;
         }
         // copy all of the contents of this rline to the new rline
-        for(size_t j = 0; j < old->n_glyphs; j++){
+        for(size_t j = 0; j < o->n_glyphs; j++){
             // TODO: handle wide glpyhs
-            Glyph g = old->glyphs[j];
+            Glyph g = o->glyphs[j];
             // ignore glyphs that need no copying
             if(g.mode & ATTR_NORENDER) continue;
             // do we need a new rline?
             if(glyph_idx >= col){
+                if(new.len == new.cap){
+                    // cursor reflow: decrement the stored y_abs values
+                    for(size_t i = 0; i < ncrs; i++){
+                        cursor_reflow_decrement_y(crs[i]);
+                    }
+                }
                 // use the same line_id as the last one
-                new = tnew_rline(t, new->line_id, col);
+                n = scr_new_rline(&new, n->line_id, col);
                 // printf("\\n\n");
                 glyph_idx = 0;
             }
             // actually copy a glyph into the new line
-            new->glyphs[glyph_idx] = g;
+            n->glyphs[glyph_idx] = g;
             // printf("%c (%lu)\n", (char)g.u, new->line_id);
             // cursor reflow: cursor-over-copyable-glyph case
-            cursor_reflow_copyable_glyph(
-                &cursor_reflow, old, j, glyph_idx, new, t->rlines_len - 1
-            );
+            for(size_t i = 0; i < ncrs; i++){
+                cursor_reflow_copyable_glyph(
+                    crs[i], o, j, glyph_idx, n, new.len - 1
+                );
+            }
             glyph_idx++;
         }
         /* cursor reflow: cursor-not-over-copyable-glyph case: just place the
            cursor at the end of the line to support 99.99% of cases */
-        cursor_reflow_noncopyable_glyph(
-            &cursor_reflow, old, glyph_idx, new, t->rlines_len - 1
-        );
+        for(size_t i = 0; i < ncrs; i++){
+            cursor_reflow_noncopyable_glyph(
+                crs[i], o, glyph_idx, n, new.len - 1
+            );
+        }
 
     cu_rline:
-        rline_free(&old);
+        rline_free(&o);
     }
     // printf("ENDCOPY\n");
 
     // {
     //     printf("POSTCOPY:\n");
-    //     for(size_t i = 0; i < t->rlines_len; i++){
+    //     for(size_t i = 0; i < new.len; i++){
     //         // get the next line
-    //         size_t idx = (t->rlines_start + i) % (t->rlines_cap + 1);
-    //         RLine *rline = t->rlines[idx];
+    //         size_t idx = (new.start + i) % (new.cap + 1);
+    //         RLine *rline = new.rlines[idx];
     //         char utf8[4096];
     //         size_t utf8_len = 0;
     //         for(size_t j = 0; j < rline->n_glyphs; j++){
@@ -2483,11 +2523,78 @@ tresize(Term *t, int col, int row)
     //     printf("ENDPOSTCOPY\n");
     // }
 
-    free(old_rlines);
+    free(old.rlines);
 
     // make sure we have at least enough rlines to fill the screen
-    while(t->rlines_len < row){
-        tnew_rline(t, 0, col);
+    while(new.len < row){
+        scr_new_rline(&new, 0, col);
+    }
+
+    return new;
+}
+
+void
+tresize(Term *t, int col, int row)
+{
+    if (col < 1 || row < 1) {
+        fprintf(stderr, "tresize: error resizing to %dx%d\n", col, row);
+        return;
+    }
+
+    int *bp;
+    int old_col = t->col;
+
+    tunrender(t);
+
+    /* cursors to reflow:
+         - the current cursor (might be on main or alt screen)
+         - the saved main cursor
+         - the saved alt cursor
+       Note that when we trim rlines to suit the main cursor, we never trim
+       rlines based on either saved cursor.  We just discard the saved cursors
+       if that case arises. */
+    cursor_reflow_t cr_cur = cursor_reflow_new(t->c, get_cursor_rline(t));
+    cursor_reflow_t cr_saved_main = cursor_reflow_new(
+        t->c, get_rline(&t->main, term2abs(t, t->saved[0].y))
+    );
+    cursor_reflow_t cr_saved_alt = cursor_reflow_new(
+        t->c, get_rline(&t->alt, term2abs(t, t->saved[1].y))
+    );
+
+    // reflow main screen first
+    {
+        cursor_reflow_t *crs[] = {&cr_saved_main, NULL};
+        size_t ncrs = 1;
+        if(t->scr == &t->main){
+            crs[ncrs++] = &cr_cur;
+        }
+        t->main = reflow(
+            t->main,
+            old_col,
+            row,
+            col,
+            t->main.cap, // map cap is unchanged
+            crs,
+            ncrs
+        );
+    }
+
+    // then reflow alt screen
+    {
+        cursor_reflow_t *crs[] = {&cr_saved_alt, NULL};
+        size_t ncrs = 1;
+        if(t->scr == &t->alt){
+            crs[ncrs++] = &cr_cur;
+        }
+        t->alt = reflow(
+            t->alt,
+            old_col,
+            row,
+            col,
+            row, // altscreen cap is always the number of rows
+            crs,
+            ncrs
+        );
     }
 
     /* TODO: Deal with scroll at some point.
@@ -2496,8 +2603,8 @@ tresize(Term *t, int col, int row)
     // (until then, just make sure scroll is always valid)
     t->scroll = 0;
 
-    /* Discard lines in the buffer that are so low that the cursor would have
-       to move downwards.
+    /* current cursor only: Discard lines in the buffer that are so low that
+       the cursor would have to move downwards.
 
        In practice, this should never discard useful information, because
        either the cursor is in an early row and the terminal is either mostly
@@ -2508,15 +2615,16 @@ tresize(Term *t, int col, int row)
        a 39-row terminal, that means we trim (40 - 0) - 39 = 1 lines.
 
        Note that there is no change to x or absolute y position as a result. */
-    size_t n_extras = cursor_reflow_lines_to_trim(
-        &cursor_reflow, t->rlines_len, row
-    );
+    size_t n_extras = cursor_reflow_lines_to_trim(&cr_cur, t->scr->len, row);
     for(size_t i = 0; i < n_extras; i++){
-        RLine *rline = get_rline(t, t->rlines_len-- - 1);
+        RLine *rline = get_rline(t->scr, t->scr->len-- - 1);
         rline_free(&rline);
     }
 
-    // TODO: deal with altscreen
+    /* saved cursors: discard a saved cursor which would require us to drop
+       any saved lines */
+    cursor_reflow_invalidate_if_lines_to_trim(&cr_saved_main, t->main.len, row);
+    cursor_reflow_invalidate_if_lines_to_trim(&cr_saved_alt, t->alt.len, row);
 
     /* resize to new height */
     t->tabs = xrealloc(t->tabs, col * sizeof(*t->tabs));
@@ -2536,8 +2644,10 @@ tresize(Term *t, int col, int row)
     t->col = col;
     t->row = row;
 
-    // set the reflowed cursor position
-    t->c = cursor_reflow_done(&cursor_reflow, t);
+    // set the reflowed cursor positions
+    t->c = cursor_reflow_done(&cr_cur, t->scr, row);
+    t->saved[0] = cursor_reflow_done(&cr_saved_main, &t->main, row);
+    t->saved[1] = cursor_reflow_done(&cr_saved_alt, &t->alt, row);
 
     tscrollregion(t, 0, row-1);
 
@@ -2589,20 +2699,21 @@ RLine *rline_new(size_t n_glyphs, uint64_t line_id){
 }
 
 // create a new rline in the ring buffer, discarding the oldest one as needed.
-RLine *tnew_rline(Term *t, uint64_t line_id, size_t cols){
+RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols){
     // is ring buffer full?
-    if(t->rlines_len == t->rlines_cap){
+    if(scr->len == scr->cap){
         // free oldest rline
-        rline_free(&t->rlines[t->rlines_start]);
+        rline_free(&scr->rlines[scr->start]);
         // forget the oldest history element (start of the ring buffer)
-        t->rlines_start = rlines_idx(t, 1);
-        t->rlines_len--;
+        scr->start = rlines_idx(scr, 1);
+        scr->len--;
     }
     // extend the buffer
     RLine *out = rline_new(cols, line_id);
-    t->rlines[rlines_idx(t, t->rlines_len++)] = out;
+    scr->rlines[rlines_idx(scr, scr->len++)] = out;
 
     return out;
+
 }
 
 static fmt_overrides_t t_get_fmt_override(Term *t, int y_abs){
@@ -2786,8 +2897,11 @@ void rline_set_glyph(RLine *rline, size_t idx, Glyph g){
 
 // delete any rendered artifacts but leave the text alone
 void tunrender(Term *t){
-    for(size_t i = 0; i < t->rlines_len; i++){
-        rline_unrender(get_rline(t, i));
+    for(size_t i = 0; i < t->main.len; i++){
+        rline_unrender(get_rline(&t->main, i));
+    }
+    for(size_t i = 0; i < t->alt.len; i++){
+        rline_unrender(get_rline(&t->alt, i));
     }
 }
 
@@ -2827,7 +2941,7 @@ void trender(
 
     for(size_t i = 0; i < t->row; i++){
         size_t y_abs = view2abs(t, i);
-        RLine *rline = get_rline(t, y_abs);
+        RLine *rline = get_rline(t->scr, y_abs);
         // capture any format overrides
         fmt_overrides_t ovr = t_get_fmt_override(t, y_abs);
         // render this line
