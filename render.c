@@ -339,6 +339,18 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 ttywrite(g, "\x1b", 1, 0);
                 return TRUE;
 
+            // tab key
+            case GDK_KEY_Tab:
+                ttywrite(g, "\x09", 1, 0);
+                return TRUE;
+
+            // shift+tab (wtf, gtk?)
+            case GDK_KEY_ISO_Left_Tab:
+                // CBT: cursor backward tabulation
+                // https://vt100.net/docs/vt510-rm/CBT.html
+                ttywrite(g, "\x1b[Z", 3, 0);
+                return TRUE;
+
             // arrow keys
             // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-6
             case GDK_KEY_Up:
@@ -355,7 +367,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 return TRUE;
         }
 
-        printf("unhandled keypress! (%d)\n", event_key->keyval);
+        printf("unhandled keypress! (%x)\n", event_key->keyval);
     }
 
     return FALSE;
