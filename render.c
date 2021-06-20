@@ -304,8 +304,14 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     bool ctrl = event_key->state & GDK_CONTROL_MASK;
     bool shift = event_key->state & GDK_SHIFT_MASK;
 
-    if(ctrl && event_key->keyval < 128){
-        key_action_t *key_action = keymap[event_key->keyval][shift];
+    size_t mod_idx = ctrl + 2*shift;
+    size_t key_idx = (size_t)-1;
+    if(event_key->keyval < 128){
+        // ascii keys are 1:1 with key_idx
+        key_idx = event_key->keyval;
+    }
+    if(key_idx != (size_t)-1){
+        key_action_t *key_action = keymap[event_key->keyval][mod_idx];
         // is there a keyaction defined for this key and modifier combination?
         if(key_action){
             if(key_action->key){
