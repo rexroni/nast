@@ -221,6 +221,30 @@ static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
     return FALSE;
 }
 
+// shift_pgup is a key action
+void shift_pgup(void *globals, GdkEventKey *event_key){
+    (void)event_key;
+    globals_t *g = globals;
+    (void)g;
+    die("shift_pgup\n");
+}
+
+// shift_pgdn is a key action
+void shift_pgdn(void *globals, GdkEventKey *event_key){
+    (void)event_key;
+    globals_t *g = globals;
+    (void)g;
+    die("shift_pgdn\n");
+}
+
+// shift_insert is a key action
+void shift_insert(void *globals, GdkEventKey *event_key){
+    (void)event_key;
+    globals_t *g = globals;
+    (void)g;
+    die("shift_insert\n");
+}
+
 // developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-key-press-event
 static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
         gpointer user_data){
@@ -309,36 +333,43 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     if(event_key->keyval < 128){
         // ascii keys are 1:1 with key_idx
         key_idx = event_key->keyval;
-    }
-    if(key_idx != (size_t)-1){
-        key_action_t *key_action = keymap[event_key->keyval][mod_idx];
-        // is there a keyaction defined for this key and modifier combination?
-        if(key_action){
-            if(key_action->key){
-                // simple key input
-                ttywrite(g, key_action->key, 1, 0);
-            }else{
-                // key action callback
-                die("keyaction callback not yet supported\n");
-            }
-            return TRUE;
-        }
-    }
-
-
-    if(event_key->type == GDK_KEY_PRESS){
+    }else{
+        // certain other keys have explicit mappings to a key_idx
         switch(event_key->keyval){
             // see gtk-3.0/gdk/gdkkeysyms.h
-            case GDK_KEY_BackSpace:
-                ttywrite(g, ctrl ? "\x17" : "\x7f", 1, 0);
-                gtk_widget_queue_draw(g->darea);
-                return TRUE;
+            case GDK_KEY_Home:      key_idx = NAST_KEY_HOME; break;
+            case GDK_KEY_Insert:    key_idx = NAST_KEY_INSERT; break;
+            case GDK_KEY_Delete:    key_idx = NAST_KEY_DELETE; break;
+            case GDK_KEY_End:       key_idx = NAST_KEY_END; break;
+            case GDK_KEY_Page_Up:   key_idx = NAST_KEY_PGUP; break;
+            case GDK_KEY_Page_Down: key_idx = NAST_KEY_PGDN; break;
+            case GDK_KEY_BackSpace: key_idx = NAST_KEY_BKSP; break;
 
             case GDK_KEY_KP_Enter:  // not appkey mode
             case GDK_KEY_Return:
                 ttywrite(g, "\r", 1, 0);
                 gtk_widget_queue_draw(g->darea);
                 return TRUE;
+        }
+    }
+    if(key_idx != (size_t)-1){
+        key_action_t *key_action = keymap[key_idx][mod_idx];
+        // is there a keyaction defined for this key and modifier combination?
+        if(key_action){
+            if(key_action->key){
+                // simple key input
+                ttywrite(g, key_action->key, strlen(key_action->key), 0);
+            }else{
+                // key action callback
+                key_action->action(g, event_key);
+            }
+            return TRUE;
+        }
+    }
+
+    if(event_key->type == GDK_KEY_PRESS){
+        switch(event_key->keyval){
+
 
             // escape key
             case GDK_KEY_Escape:

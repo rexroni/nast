@@ -2046,10 +2046,10 @@ eschandle(Term *t, uchar ascii)
         treset(t);
         t->hooks->set_title(t->hooks, NULL);
         break;
-    case '=': /* DECPAM -- Application keypad */
+    case '=': /* DECKPAM -- Application keypad */
         t->hooks->set_mode(t->hooks, MODE_APPKEYPAD, 1);
         break;
-    case '>': /* DECPNM -- Normal keypad */
+    case '>': /* DECKPNM -- Normal keypad */
         t->hooks->set_mode(t->hooks, MODE_APPKEYPAD, 0);
         break;
     case '7': /* DECSC -- Save Cursor */

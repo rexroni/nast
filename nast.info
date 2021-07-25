@@ -1,3 +1,4 @@
+# see `man 5 terminfo`
 nast| not-as-simpleterm,
 	acsc=+C\,D-A.B0E``aaffgghFiGjjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~,
 	am,

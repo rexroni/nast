@@ -1,10 +1,28 @@
-typedef struct {
+typedef struct key_action_t {
     char *key;
-    int (*action)(void *globals, GdkEventKey *event_key);
+    void (*action)(void *globals, GdkEventKey *event_key);
+    struct key_action_t *appcursor[2];
+    struct key_action_t *appkey[2];
 } key_action_t; // "key action"
+
+const unsigned int NAST_KEY_HOME = 0x80;
+const unsigned int NAST_KEY_INSERT = 0x81;
+const unsigned int NAST_KEY_DELETE = 0x82;
+const unsigned int NAST_KEY_END = 0x83;
+const unsigned int NAST_KEY_PGUP = 0x84;
+const unsigned int NAST_KEY_PGDN = 0x85;
+const unsigned int NAST_KEY_BKSP = 0x86;
+const unsigned int NAST_KEY_ENTER = 0x87;
 
 #define K(str) &(key_action_t){.key=str}
 #define A(fn) &(key_action_t){.action=fn}
+#define C(x, y) &(key_action_t){.appcursor={(x), (y)}}
+#define Y(x, y) &(key_action_t){.appkey={(x), (y)}}
+
+// actions defined in render.c
+void shift_pgup(void *globals, GdkEventKey *event_key);
+void shift_pgdn(void *globals, GdkEventKey *event_key);
+void shift_insert(void *globals, GdkEventKey *event_key);
 
 key_action_t *keymap[][4] = {
 //   none               ctrl                shift               ctrl+shift
@@ -143,6 +161,46 @@ key_action_t *keymap[][4] = {
     {NULL,              NULL,               NULL,               NULL}, // 0x7d
     {NULL,              NULL,               NULL,               NULL}, // 0x7e
     {NULL,              NULL,               NULL,               NULL}, // 0x7f
+
+// NON-ASCII KEYMAP
+
+    // where known, the name of the terminfo capability is shown
+    // TODO: how do I get khome to be emitted?
+
+    // YOU ARE HERE: you're not quite sure what the best way forwards is
+    // maybe it's just to more perfectly copy what st is doing so you don't
+    // have to fix the nast.info yet.  But eventually you'd like to figure out
+    // how to just use xterm's terminfo, because that would be hella useful;
+    // that shit's installed everywhere.
+    //
+    // BUT... you've noticed that xterm emits some keys that don't seem to be
+    // anywhere in its terminfo, such as ctrl-home or ctrl-shift-home
+
+    // Also see
+    //   man 5 terminfo
+    //   infocmp xterm
+    //   https://spin0r.wordpress.com/2012/12/24/terminally-confused-part-five/
+
+    // home                                 kHOM
+    {K("\x1b[H"),       K("\x1b[H"),        K("\x1b[2J"),    K("\x1b[H")}, // NAST_KEY_HOME
+    // smir             il1
+    {K("\x1b[4h"),      K("\x1b[L"),        A(shift_insert), NULL}, // NAST_KEY_INSERT
+    // [2]                                  [2]
+    {K("\x1b[3~"),      NULL,               K("\x1b[2K"),    NULL}, // NAST_KEY_DELETE
+    // [2]                                  [2]
+    {K("\x1b[4~"),      NULL,               K("\x1b[K"),     NULL}, // NAST_KEY_END
+    // [2]
+    {K("\x1b[5~"),      NULL,               A(shift_pgup),   NULL}, // NAST_KEY_PGUP
+    // [2]
+    {K("\x1b[6~"),      NULL,               A(shift_pgdn),   NULL}, // NAST_KEY_PGDN
+
+    // [2]              [2]                 [2]              [2]
+    {K("\x7f"),         K("\x17"),          K("\x08"),       K("\x17")}, // NAST_KEY_BKSP
+    {K("\x7f"),         K("\x17"),          K("\x08"),       K("\x17")}, // NAST_KEY_ENTER
+
+    // arrow keys
+    // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-6
+    // {C(K("\x1b[A"), K("\x1bOA")),      NULL,               A(shift_pgdn),   NULL}, // NAST_KEY_UP
 };
 
 #undef K
