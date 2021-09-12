@@ -193,6 +193,13 @@ void *xmalloc(size_t);
 void *xrealloc(void *, size_t);
 char *xstrdup(char *);
 
+size_t utf8decode(const char *, Rune *, size_t);
+Rune utf8decodebyte(char, size_t *);
+char utf8encodebyte(Rune, size_t);
+size_t utf8validate(Rune *, size_t);
+char *base64dec(const char *, size_t *);
+char base64dec_getc(const char **);
+
 /* config.h globals */
 extern char *utmp;
 extern char *stty_args;

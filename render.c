@@ -327,8 +327,9 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 
     bool ctrl = event_key->state & GDK_CONTROL_MASK;
     bool shift = event_key->state & GDK_SHIFT_MASK;
+    bool alt = event_key->state & GDK_MOD1_MASK;
+    bool meta = event_key->state & GDK_META_MASK;
 
-    size_t mod_idx = ctrl + 2*shift;
     size_t key_idx = (size_t)-1;
     if(event_key->keyval < 128){
         // ascii keys are 1:1 with key_idx
@@ -338,72 +339,146 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
         switch(event_key->keyval){
             // see gtk-3.0/gdk/gdkkeysyms.h
             case GDK_KEY_Home:      key_idx = NAST_KEY_HOME; break;
+            case GDK_KEY_KP_End:
+            case GDK_KEY_End:       key_idx = NAST_KEY_END; break;
             case GDK_KEY_Insert:    key_idx = NAST_KEY_INSERT; break;
             case GDK_KEY_Delete:    key_idx = NAST_KEY_DELETE; break;
-            case GDK_KEY_End:       key_idx = NAST_KEY_END; break;
+            case GDK_KEY_KP_Page_Up:
             case GDK_KEY_Page_Up:   key_idx = NAST_KEY_PGUP; break;
+            case GDK_KEY_KP_Page_Down:
             case GDK_KEY_Page_Down: key_idx = NAST_KEY_PGDN; break;
             case GDK_KEY_BackSpace: key_idx = NAST_KEY_BKSP; break;
+            case GDK_KEY_KP_Enter:
+            case GDK_KEY_Return:    key_idx = NAST_KEY_ENTER; break;
+            case GDK_KEY_ISO_Left_Tab:
+            case GDK_KEY_KP_Tab:
+            case GDK_KEY_Tab:       key_idx = NAST_KEY_TAB; break;
 
-            case GDK_KEY_KP_Enter:  // not appkey mode
-            case GDK_KEY_Return:
-                ttywrite(g, "\r", 1, 0);
-                gtk_widget_queue_draw(g->darea);
-                return TRUE;
+            case GDK_KEY_Up:        key_idx = NAST_KEY_UP; break;
+            case GDK_KEY_Down:      key_idx = NAST_KEY_DN; break;
+            case GDK_KEY_Left:      key_idx = NAST_KEY_LEFT; break;
+            case GDK_KEY_Right:     key_idx = NAST_KEY_RIGHT; break;
+
+            case GDK_KEY_KP_F1:
+            case GDK_KEY_F1:        key_idx = NAST_KEY_F1; break;
+            case GDK_KEY_KP_F2:
+            case GDK_KEY_F2:        key_idx = NAST_KEY_F2; break;
+            case GDK_KEY_KP_F3:
+            case GDK_KEY_F3:        key_idx = NAST_KEY_F3; break;
+            case GDK_KEY_KP_F4:
+            case GDK_KEY_F4:        key_idx = NAST_KEY_F4; break;
+
+            case GDK_KEY_F5:        key_idx = NAST_KEY_F5; break;
+            case GDK_KEY_F6:        key_idx = NAST_KEY_F6; break;
+            case GDK_KEY_F7:        key_idx = NAST_KEY_F7; break;
+            case GDK_KEY_F8:        key_idx = NAST_KEY_F8; break;
+            case GDK_KEY_F9:        key_idx = NAST_KEY_F9; break;
+            case GDK_KEY_F10:       key_idx = NAST_KEY_F10; break;
+            case GDK_KEY_F11:       key_idx = NAST_KEY_F11; break;
+            case GDK_KEY_F12:       key_idx = NAST_KEY_F12; break;
+            case GDK_KEY_F13:       key_idx = NAST_KEY_F13; break;
+            case GDK_KEY_F14:       key_idx = NAST_KEY_F14; break;
+            case GDK_KEY_F15:       key_idx = NAST_KEY_F15; break;
+            case GDK_KEY_F16:       key_idx = NAST_KEY_F16; break;
+            case GDK_KEY_F17:       key_idx = NAST_KEY_F17; break;
+            case GDK_KEY_F18:       key_idx = NAST_KEY_F18; break;
+            case GDK_KEY_F19:       key_idx = NAST_KEY_F19; break;
+            case GDK_KEY_F20:       key_idx = NAST_KEY_F20; break;
+            case GDK_KEY_F21:       key_idx = NAST_KEY_F21; break;
+            case GDK_KEY_F22:       key_idx = NAST_KEY_F22; break;
+            case GDK_KEY_F23:       key_idx = NAST_KEY_F23; break;
+            case GDK_KEY_F24:       key_idx = NAST_KEY_F24; break;
+            case GDK_KEY_F25:       key_idx = NAST_KEY_F25; break;
+            case GDK_KEY_F26:       key_idx = NAST_KEY_F26; break;
+            case GDK_KEY_F27:       key_idx = NAST_KEY_F27; break;
+            case GDK_KEY_F28:       key_idx = NAST_KEY_F28; break;
+            case GDK_KEY_F29:       key_idx = NAST_KEY_F29; break;
+            case GDK_KEY_F30:       key_idx = NAST_KEY_F30; break;
+            case GDK_KEY_F31:       key_idx = NAST_KEY_F31; break;
+            case GDK_KEY_F32:       key_idx = NAST_KEY_F32; break;
+            case GDK_KEY_F33:       key_idx = NAST_KEY_F33; break;
+            case GDK_KEY_F34:       key_idx = NAST_KEY_F34; break;
+            case GDK_KEY_F35:       key_idx = NAST_KEY_F35; break;
         }
     }
     if(key_idx != (size_t)-1){
-        key_action_t *key_action = keymap[key_idx][mod_idx];
-        // is there a keyaction defined for this key and modifier combination?
-        if(key_action){
-            if(key_action->key){
-                // simple key input
-                ttywrite(g, key_action->key, strlen(key_action->key), 0);
-            }else{
-                // key action callback
-                key_action->action(g, event_key);
+        key_map_t *map = keymap[key_idx];
+
+        /* the ALTIFY flag on the zeroth element dictates if we allow alt to
+           add 128 to the output */
+        bool altify = map[0].mask & ALTIFY;
+
+        size_t i = 0;
+        while(true){
+            bool ok = true;
+            unsigned int mask = map[i].mask;
+            ok &= !(mask & MATCH_CTRL) || (ctrl == !!(mask & CTRL_MASK));
+            ok &= !(mask & MATCH_SHIFT) || (shift == !!(mask & SHIFT_MASK));
+            ok &= !(mask & MATCH_ALT) || (alt == !!(mask & ALT_MASK));
+            ok &= !(mask & MATCH_META) || (meta == !!(mask & META_MASK));
+            if(ok) break;
+            i++;
+        }
+
+        key_action_t *act = map[i].action;
+        char buf[128];
+        size_t len;
+        simple_key_t simple;
+        // descend through any pointers to a terminal action
+        while(true){
+            switch(act->type){
+                case KEY_ACTION_APPCURSOR:
+                    act = act->val.appcursor[!g->appcursor];
+                    // restart the loop with the new key action
+                    continue;
+
+                case KEY_ACTION_APPKEY:
+                    act = act->val.appcursor[!g->appkeypad];
+                    // restart the loop with the new key action
+                    continue;
+
+                case KEY_ACTION_FUNC:
+                    // execute the action and end the entire function
+                    act->val.func(g, event_key);
+                    return TRUE;
+
+                case KEY_ACTION_MODS:
+                    /* MODS is a terminal action only when there is a modifier
+                       key pressed */
+                    if(!shift && !ctrl && !alt && !meta){
+                        act = act->val.mods[1];
+                        continue;
+                    }
+                    // the "on" action for mods is always a simple
+                    simple = act->val.mods[0]->val.simple;
+                    int mod_idx = 1 + shift + 2*alt + 4*ctrl + 8*meta;
+                    int ilen = sprintf(buf, simple.text, mod_idx);
+                    if(ilen < 1){
+                        fprintf(stderr, "failed to sprintf(%.*s, %d)\n",
+                                (int)simple.len, simple.text, mod_idx);
+                    }else{
+                        ttywrite(g, buf, (size_t)ilen, 0);
+                    }
+                    return TRUE;
+
+                case KEY_ACTION_SIMPLE:
+                    simple = act->val.simple;
+                    if(altify && alt){
+                        /* when altify is set, we take the value of char we
+                           would emit, add 128 to it, then utf-8 encode it and
+                           emit the result */
+                        Rune r = simple.text[0];
+                        len = utf8encode(r + 128, buf);
+                        ttywrite(g, buf, len, 0);
+                    }else{
+                        ttywrite(g, simple.text, simple.len, 0);
+                    }
+                    return TRUE;
             }
-            return TRUE;
         }
     }
 
     if(event_key->type == GDK_KEY_PRESS){
-        switch(event_key->keyval){
-
-
-            // escape key
-            case GDK_KEY_Escape:
-                ttywrite(g, "\x1b", 1, 0);
-                return TRUE;
-
-            // tab key
-            case GDK_KEY_Tab:
-                ttywrite(g, "\x09", 1, 0);
-                return TRUE;
-
-            // shift+tab (wtf, gtk?)
-            case GDK_KEY_ISO_Left_Tab:
-                // CBT: cursor backward tabulation
-                // https://vt100.net/docs/vt510-rm/CBT.html
-                ttywrite(g, "\x1b[Z", 3, 0);
-                return TRUE;
-
-            // arrow keys
-            // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-6
-            case GDK_KEY_Up:
-                ttywrite(g, g->appcursor ? "\x1b[A" : "\x1bOA", 3, 0);
-                return TRUE;
-            case GDK_KEY_Down:
-                ttywrite(g, g->appcursor ? "\x1b[B" : "\x1bOB", 3, 0);
-                return TRUE;
-            case GDK_KEY_Right:
-                ttywrite(g, g->appcursor ? "\x1b[C" : "\x1bOC", 3, 0);
-                return TRUE;
-            case GDK_KEY_Left:
-                ttywrite(g, g->appcursor ? "\x1b[D" : "\x1bOD", 3, 0);
-                return TRUE;
-        }
-
         printf("unhandled keypress! (%x)\n", event_key->keyval);
     }
 
@@ -643,7 +718,6 @@ int main(int argc, char *argv[]){
     GIOCondition cond = G_IO_IN | G_IO_PRI | G_IO_ERR | G_IO_HUP | G_IO_NVAL;
     guint rd_event_src_id = g_io_add_watch(ttychan, cond, tty_io, &g);
     (void)rd_event_src_id;
-
 
     // write some shit
     char buf[] = "\x1b[35mhello\x1b[m \x1b[45mworld\x1b[m!\r\nthis \x1b[45mis a\r\n\x1b[30mtest\x1b[m\r\n";

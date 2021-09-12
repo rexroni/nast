@@ -248,14 +248,6 @@ static void tdeftran(Term *t, char);
 static void tstrsequence(Term *t, uchar);
 static void tscrollregion(Term *t, int top, int bot);
 
-static size_t utf8decode(const char *, Rune *, size_t);
-static Rune utf8decodebyte(char, size_t *);
-static char utf8encodebyte(Rune, size_t);
-static size_t utf8validate(Rune *, size_t);
-
-static char *base64dec(const char *, size_t *);
-static char base64dec_getc(const char **);
-
 static ssize_t xwrite(int, const char *, size_t);
 
 /* Globals */
