@@ -2,7 +2,7 @@
 csr=\E[%i%p1%d;%p2%dr
 
 # IN XTERM, NOT ST
-acsc=``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
+# acsc=``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
 cvvis=\E[?12;25h
 flash=\E[?5h$<100/>\E[?5l
 is2=\E[!p\E[?3;4l\E[4l\E>
@@ -37,7 +37,7 @@ u8=\E[?%[;0123456789]c
 u9=\E[c
 
 # IN ST, NOT XTERM
-acsc=+C\,D-A.B0E``aaffgghFiGjjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
+# acsc=+C\,D-A.B0E``aaffgghFiGjjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
 cvvis=\E[?25h
 enacs=\E)0
 flash=\E[?5h$<80/>\E[?5l

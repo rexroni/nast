@@ -228,6 +228,8 @@ static void tinsertblank(Term *t, int);
 static void tinsertblankline(Term *t, int);
 // static int tlinelen(Term *t, int);
 static void tmoveto(Term *t, int, int);
+static void tmoveto_origin(Term *t, int x, int y);
+static Rune acsc(Rune u, int charset);
 static void tnewline(Term *t, int, bool);
 static void tputtab(Term *t, int);
 static void tputc(Term *t, Rune);
@@ -967,38 +969,84 @@ tmoveto_origin(Term *t, int x, int y)
     tmoveto(t, x, y + ((t->c.state & CURSOR_ORIGIN) ? t->top: 0));
 }
 
+// see man 5 terminfo ("Line Graphics")
+Rune
+acsc(Rune u, int charset)
+{
+    if(charset != CS_GRAPHIC0){
+        return u;
+    }
+
+    /* The following table was found by running the following python code
+       inside of an xterm window, and copy/pasting the xterm-rendered result:
+
+        import os
+        os.write(1, b"    static char *acsc[] = {")
+        for i in range(96, 127):
+            os.write(1, b"        \"")
+            os.system("tput smacs")
+            os.write(1, chr(i).encode())
+            os.system("tput rmacs")
+            os.write(1, b"\",  // 0x%x"%i)
+            if i > 32 and i < 127:
+                os.write(1, b" (%s)"%chr(i).encode())
+            else:
+                os.write(1, b"    ")
+            os.write(1, b"\n")
+        os.write(1, b"    };")
+
+       Note that the ascs string from `infocmp xterm` indicates that b-e are
+       not supported, xterm honors them anyway.  We choose to do the same. */
+    static char *acsc[] = {
+        "◆",  // 0x60 (`)
+        "▒",  // 0x61 (a)
+        "␉",  // 0x62 (b)
+        "␌",  // 0x63 (c)
+        "␍",  // 0x64 (d)
+        "␊",  // 0x65 (e)
+        "°",  // 0x66 (f)
+        "±",  // 0x67 (g)
+        "␤",  // 0x68 (h)
+        "␋",  // 0x69 (i)
+        "┘",  // 0x6a (j)
+        "┐",  // 0x6b (k)
+        "┌",  // 0x6c (l)
+        "└",  // 0x6d (m)
+        "┼",  // 0x6e (n)
+        "⎺",  // 0x6f (o)
+        "⎻",  // 0x70 (p)
+        "─",  // 0x71 (q)
+        "⎼",  // 0x72 (r)
+        "⎽",  // 0x73 (s)
+        "├",  // 0x74 (t)
+        "┤",  // 0x75 (u)
+        "┴",  // 0x76 (v)
+        "┬",  // 0x77 (w)
+        "│",  // 0x78 (x)
+        "≤",  // 0x79 (y)
+        "≥",  // 0x7a (z)
+        "π",  // 0x7b ({)
+        "≠",  // 0x7c (|)
+        "£",  // 0x7d (})
+        "·",  // 0x7e (~)
+    };
+    static size_t acsc_len = sizeof(acsc)/sizeof(*acsc);
+
+    if(u < '`' || u - '`' > acsc_len){
+        return u;
+    }
+
+    Rune out;
+    utf8decode(acsc[u - '`'], &out, UTF_SIZ);
+
+    return out;
+}
+
 // uses terminal coordinates
 void
 tsetchar(Term *t, Rune u, Glyph *attr, int x, int y)
 {
     die("update tsetchar");
-    static char *vt100_0[62] = { /* 0x41 - 0x7e */
-        "↑", "↓", "→", "←", "█", "▚", "☃", /* A - G */
-        0, 0, 0, 0, 0, 0, 0, 0, /* H - O */
-        0, 0, 0, 0, 0, 0, 0, 0, /* P - W */
-        0, 0, 0, 0, 0, 0, 0, " ", /* X - _ */
-        "◆", "▒", "␉", "␌", "␍", "␊", "°", "±", /* ` - g */
-        "␤", "␋", "┘", "┐", "┌", "└", "┼", "⎺", /* h - o */
-        "⎻", "─", "⎼", "⎽", "├", "┤", "┴", "┬", /* p - w */
-        "│", "≤", "≥", "π", "≠", "£", "·", /* x - ~ */
-    };
-
-    /*
-     * The table is proudly stolen from rxvt.
-     */
-    if (t->trantbl[t->charset] == CS_GRAPHIC0 &&
-       BETWEEN(u, 0x41, 0x7e) && vt100_0[u - 0x41])
-        utf8decode(vt100_0[u - 0x41], &u, UTF_SIZ);
-
-    // if (t->line[y][x].mode & ATTR_WIDE) {
-    //     if (x+1 < t->col) {
-    //         t->line[y][x+1].u = ' ';
-    //         t->line[y][x+1].mode &= ~ATTR_WDUMMY;
-    //     }
-    // } else if (t->line[y][x].mode & ATTR_WDUMMY) {
-    //     t->line[y][x-1].u = ' ';
-    //     t->line[y][x-1].mode &= ~ATTR_WIDE;
-    // }
 }
 
 void
@@ -2175,6 +2223,7 @@ check_control_code:
         // selclear(t);
     }
 
+    u = acsc(u, t->trantbl[t->charset]);
     temit(t, u, width);
 }
 
