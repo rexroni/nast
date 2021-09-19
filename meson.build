@@ -34,3 +34,8 @@ executable(
   ['spysh.c'],
   dependencies: [cc.find_library('util')],
 )
+
+executable(
+  'dumptermios',
+  ['dumptermios.c'],
+)
