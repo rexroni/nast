@@ -28,3 +28,9 @@ executable(
   'raw_inputs',
   ['raw_inputs.c'],
 )
+
+executable(
+  'spysh',
+  ['spysh.c'],
+  dependencies: [cc.find_library('util')],
+)
