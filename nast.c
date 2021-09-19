@@ -541,7 +541,6 @@ execsh(char *cmd, char **args)
     signal(SIGTERM, SIG_DFL);
     signal(SIGALRM, SIG_DFL);
 
-    // TODO: support more CSI commands so that zsh works
     execvp("/bin/sh", (char*[]){"/bin/sh", NULL});
     execvp(prog, args);
     _exit(1);
@@ -598,6 +597,16 @@ ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
     /* seems to work fine on linux, openbsd and freebsd */
     if (openpty(&m, &s, NULL, NULL, NULL) < 0)
         die("openpty failed: %s\n", strerror(errno));
+
+    // configure the terminal with 0x08 as the backspace key, like xterm
+    struct termios ttyattr;
+    if(tcgetattr(m, &ttyattr)){
+        die("tcgetattr() failed: %s\n", strerror(errno));
+    }
+    ttyattr.c_cc[VERASE] = '\b';
+    if(tcsetattr(m, TCSADRAIN, &ttyattr)){
+        die("tcsetattr() failed: %s\n", strerror(errno));
+    }
 
     switch (*pid = fork()) {
     case -1:

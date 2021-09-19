@@ -27,7 +27,7 @@ flash=\E[?5h$<100/>\E[?5l
 is2=\E[!p\E[?3;4l\E[4l\E>
 ka1=\EOw
 ka3=\EOy
-kbs=^H
+# kbs=^H
 kc1=\EOq
 kc3=\EOs
 kend=\EOF
@@ -63,7 +63,7 @@ hs
 is2=\E[4l\E>\E[?1034l
 ka1=\E[1~
 ka3=\E[5~
-kbs=^?
+# kbs=^?  # \x1f
 kc1=\E[4~
 kc3=\E[6~
 kclr=\E[3;5~
