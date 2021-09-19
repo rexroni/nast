@@ -1,5 +1,24 @@
+# see man 5 {terminfo,user_caps} for what each capability means
+
 # Was in st, removed in nast; needs to be readded:
 csr=\E[%i%p1%d;%p2%dr
+
+# MINOR DIFFERENCES, EXPLAINED
+
+    # xterm
+    smcup=\E[?1049h\E[22;0;0t
+    rmcup=\E[?1049l\E[23;0;0t
+    # st
+    smcup=\E[?1049h
+    rmcup=\E[?1049l
+    # see XTWINOPS, https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+    Xterm has a window-manager integration command, XTWINOPS.
+        \E[22;0;0t -> Save xterm icon and window title on stack
+        \E[23;0;0t -> Restore xterm icon and window title from stack
+    So xterm is giving a hint that cli applications ought to save the xterm
+    icon and title when entering altscreen, and restore it afterwards.  We can
+    safely ignore this, nast will print warnings about unknown CSIs and that is
+    just fine.
 
 # IN XTERM, NOT ST
 # acsc=``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~
@@ -22,13 +41,11 @@ mgc=\E[?69l
 rep=%p1%c\E[%p2%{1}%-%db
 rin=\E[%p1%dT
 rmam=\E[?7l
-rmcup=\E[?1049l\E[23;0;0t
 rmm=\E[?1034l
 rs2=\E[!p\E[?3;4l\E[4l\E>
 sgr0=\E(B\E[m
 sgr=%?%p9%t\E(0%e\E(B%;\E[0%?%p6%t;1%;%?%p5%t;2%;%?%p2%t;4%;%?%p1%p3%|%t;7%;%?%p4%t;5%;%?%p7%t;8%;m
 smam=\E[?7h
-smcup=\E[?1049h\E[22;0;0t
 smglr=\E[?69h\E[%i%p1%d;%p2%ds
 smm=\E[?1034h
 u6=\E[%i%d;%dR
@@ -58,11 +75,9 @@ khome=\E[1~
 kil1=\E[2;5~
 kmous=\E[M
 krmir=\E[2;2~
-rmcup=\E[?1049l
 rs2=\E[4l\E>\E[?1034l
 sgr0=\E[0m
 sgr=%?%p9%t\E(0%e\E(B%;\E[0%?%p6%t;1%;%?%p2%t;4%;%?%p1%p3%|%t;7%;%?%p4%t;5%;%?%p7%t;8%;m
-smcup=\E[?1049h
 tsl=\E]0;
 
 # HANDLED BY ST (according to infocmp)
