@@ -1545,6 +1545,8 @@ csihandle(Term *t)
         case 2: /* all */
             tclearregion_term(t, 0, 0, t->col-1, t->row-1);
             break;
+        case 3: /* xterm extension: clear screen and scrollback buffer */
+            tclearregion_abs(t, 0, 0, t->col-1, t->scr->len - 1);
         default:
             goto unknown;
         }
