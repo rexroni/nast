@@ -62,7 +62,7 @@ System Architecture
     Example sequence: pressing the 'q' key:
         - window manager tells backend 'q' is hit (via B.)
         - backend tells the application by writing a 'q' to the tty (via A.)
-        - application writes 'q' key back to its stdout (via A.)
+        - application (or terminal itself) writes 'q' key back to stdout (via A.)
         - backend reads 'q' on tty, passes it to libnast (via C.)
         - libnast updates the terminal state, updates canvas
         - libnast tells backend canvas is updated
@@ -80,6 +80,19 @@ System Architecture
         - libnast calls the THook to tell the backend to write response to tty
         - backend writes the response bytes to the tty
         - application reads the response on its stdin (the tty)
+
+Alternatives
+------------
+
+pyte (pyte.readthedocs.io/en/latest/)
+
+    pyte is a PYthon Terminal Emulator library.  It is very similar in goals to
+    libnast, but it's written in python.  I'm interested in a C library.
+
+libvterm (github.com/neovim/libvterm)
+
+    libvterm looks to be neovim's solution to the terminal emulator library
+    problem.  I looked at using it, but it has no documentation.
 
 Credits
 -------
