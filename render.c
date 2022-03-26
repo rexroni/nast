@@ -21,6 +21,7 @@ typedef struct {
     // rendering and io state
     bool appcursor;
     bool appkeypad;
+    bool want_focus;
 
     GtkIMContext *im_ctx;
     int ttyfd;
@@ -99,7 +100,9 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
     }
     if(mode & MODE_BLINK) die("BLINK mode not handled\n");
     if(mode & MODE_FBLINK) die("FBLINK mode not handled\n");
-    if(mode & MODE_FOCUS) die("FOCUS mode not handled\n");
+    if(mode & MODE_FOCUS){
+        g->want_focus = (bool)val;
+    }
     if(mode & MODE_MOUSEX10) die("MOUSEX10 mode not handled\n");
     if(mode & MODE_MOUSEMANY) die("MOUSEMANY mode not handled\n");
     if(mode & MODE_NUMLOCK) die("NUMLOCK mode not handled\n");
@@ -488,6 +491,34 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     return FALSE;
 }
 
+// developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-focus-in-event
+// https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-FocusIn_FocusOut
+static gboolean on_focus_in(
+    GtkWidget *widget, GdkEvent *event, gpointer user_data
+){
+    (void)widget;
+    (void)event;
+    globals_t *g = user_data;
+    if(g->want_focus){
+        ttywrite(g, "\x1b[I", 3, 0);
+    }
+    return FALSE;
+}
+
+// developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-focus-out-event
+// https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-FocusIn_FocusOut
+static gboolean on_focus_out(
+    GtkWidget *widget, GdkEvent *event, gpointer user_data
+){
+    (void)widget;
+    (void)event;
+    globals_t *g = user_data;
+    if(g->want_focus){
+        ttywrite(g, "\x1b[O", 3, 0);
+    }
+    return FALSE;
+}
+
 static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
     // printf("commit! (%s)\n", str);
     globals_t *g = user_data;
@@ -693,6 +724,8 @@ int main(int argc, char *argv[]){
     // get keypresses from the window (does work)
     g_signal_connect(G_OBJECT(g.window), "key-press-event", G_CALLBACK(on_key_event), &g);
     g_signal_connect(G_OBJECT(g.window), "key-release-event", G_CALLBACK(on_key_event), &g);
+    g_signal_connect(G_OBJECT(g.window), "focus-in-event", G_CALLBACK(on_focus_in), &g);
+    g_signal_connect(G_OBJECT(g.window), "focus-out-event", G_CALLBACK(on_focus_out), &g);
 
     gtk_window_set_position(GTK_WINDOW(g.window), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(g.window), 400, 400);
