@@ -353,6 +353,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
             case GDK_KEY_ISO_Left_Tab:
             case GDK_KEY_KP_Tab:
             case GDK_KEY_Tab:       key_idx = NAST_KEY_TAB; break;
+            case GDK_KEY_Escape:    key_idx = NAST_KEY_ESC; break;
 
             case GDK_KEY_Up:        key_idx = NAST_KEY_UP; break;
             case GDK_KEY_Down:      key_idx = NAST_KEY_DN; break;
@@ -479,7 +480,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     }
 
     if(event_key->type == GDK_KEY_PRESS){
-        printf("unhandled keypress! (%x)\n", event_key->keyval);
+        printf("unhandled keypress! (0x%x)\n", event_key->keyval);
     }
 
     return FALSE;

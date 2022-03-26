@@ -1,16 +1,3 @@
-// typedef struct key_action_t {
-//     char *key;
-//     char *altify;
-//     size_t len;
-//     void (*func)(void *globals, GdkEventKey *event_key);
-//     struct key_action_t *appcursor[2];
-//     struct key_action_t *appkey[2];
-//     struct key_action_t *ctrl[2];
-//     struct key_action_t *shift[2];
-//     struct key_action_t *alt[2];
-//     struct key_action_t *mods[2];
-// } key_action_t; // "key action"
-
 typedef struct {
     char *text;
     size_t len;
@@ -133,75 +120,76 @@ const unsigned int NAST_KEY_PGDN = 0x85;
 const unsigned int NAST_KEY_BKSP = 0x86;
 const unsigned int NAST_KEY_ENTER = 0x87;
 const unsigned int NAST_KEY_TAB = 0x88;
+const unsigned int NAST_KEY_ESC = 0x89;
 
-const unsigned int NAST_KEY_UP = 0x89;
-const unsigned int NAST_KEY_DN = 0x8a;
-const unsigned int NAST_KEY_RIGHT = 0x8b;
-const unsigned int NAST_KEY_LEFT = 0x8c;
+const unsigned int NAST_KEY_UP = 0x8a;
+const unsigned int NAST_KEY_DN = 0x8b;
+const unsigned int NAST_KEY_RIGHT = 0x8c;
+const unsigned int NAST_KEY_LEFT = 0x8d;
 
-const unsigned int NAST_KEY_F1 = 0x8d;
-const unsigned int NAST_KEY_F2 = 0x8e;
-const unsigned int NAST_KEY_F3 = 0x8f;
-const unsigned int NAST_KEY_F4 = 0x90;
-const unsigned int NAST_KEY_F5 = 0x91;
-const unsigned int NAST_KEY_F6 = 0x92;
-const unsigned int NAST_KEY_F7 = 0x93;
-const unsigned int NAST_KEY_F8 = 0x94;
-const unsigned int NAST_KEY_F9 = 0x95;
-const unsigned int NAST_KEY_F10 = 0x96;
-const unsigned int NAST_KEY_F11 = 0x97;
-const unsigned int NAST_KEY_F12 = 0x98;
-const unsigned int NAST_KEY_F13 = 0x99;
-const unsigned int NAST_KEY_F14 = 0x9a;
-const unsigned int NAST_KEY_F15 = 0x9b;
-const unsigned int NAST_KEY_F16 = 0x9c;
-const unsigned int NAST_KEY_F17 = 0x9d;
-const unsigned int NAST_KEY_F18 = 0x9e;
-const unsigned int NAST_KEY_F19 = 0x9f;
-const unsigned int NAST_KEY_F20 = 0xa0;
-const unsigned int NAST_KEY_F21 = 0xa1;
-const unsigned int NAST_KEY_F22 = 0xa2;
-const unsigned int NAST_KEY_F23 = 0xa3;
-const unsigned int NAST_KEY_F24 = 0xa4;
-const unsigned int NAST_KEY_F25 = 0xa5;
-const unsigned int NAST_KEY_F26 = 0xa6;
-const unsigned int NAST_KEY_F27 = 0xa7;
-const unsigned int NAST_KEY_F28 = 0xa8;
-const unsigned int NAST_KEY_F29 = 0xa9;
-const unsigned int NAST_KEY_F30 = 0xaa;
-const unsigned int NAST_KEY_F31 = 0xab;
-const unsigned int NAST_KEY_F32 = 0xac;
-const unsigned int NAST_KEY_F33 = 0xad;
-const unsigned int NAST_KEY_F34 = 0xae;
-const unsigned int NAST_KEY_F35 = 0xaf;
-const unsigned int NAST_KEY_F36 = 0xb0;
-const unsigned int NAST_KEY_F37 = 0xb1;
-const unsigned int NAST_KEY_F38 = 0xb2;
-const unsigned int NAST_KEY_F39 = 0xb3;
-const unsigned int NAST_KEY_F40 = 0xb4;
-const unsigned int NAST_KEY_F41 = 0xb5;
-const unsigned int NAST_KEY_F42 = 0xb6;
-const unsigned int NAST_KEY_F43 = 0xb7;
-const unsigned int NAST_KEY_F44 = 0xb8;
-const unsigned int NAST_KEY_F45 = 0xb9;
-const unsigned int NAST_KEY_F46 = 0xba;
-const unsigned int NAST_KEY_F47 = 0xbb;
-const unsigned int NAST_KEY_F48 = 0xbc;
-const unsigned int NAST_KEY_F49 = 0xbd;
-const unsigned int NAST_KEY_F50 = 0xbe;
-const unsigned int NAST_KEY_F51 = 0xbf;
-const unsigned int NAST_KEY_F52 = 0xc0;
-const unsigned int NAST_KEY_F53 = 0xc1;
-const unsigned int NAST_KEY_F54 = 0xc2;
-const unsigned int NAST_KEY_F55 = 0xc3;
-const unsigned int NAST_KEY_F56 = 0xc4;
-const unsigned int NAST_KEY_F57 = 0xc5;
-const unsigned int NAST_KEY_F58 = 0xc6;
-const unsigned int NAST_KEY_F59 = 0xc7;
-const unsigned int NAST_KEY_F60 = 0xc8;
-const unsigned int NAST_KEY_F61 = 0xc9;
-const unsigned int NAST_KEY_F62 = 0xca;
-const unsigned int NAST_KEY_F63 = 0xcb;
+const unsigned int NAST_KEY_F1 = 0x8e;
+const unsigned int NAST_KEY_F2 = 0x8f;
+const unsigned int NAST_KEY_F3 = 0x90;
+const unsigned int NAST_KEY_F4 = 0x91;
+const unsigned int NAST_KEY_F5 = 0x92;
+const unsigned int NAST_KEY_F6 = 0x93;
+const unsigned int NAST_KEY_F7 = 0x94;
+const unsigned int NAST_KEY_F8 = 0x95;
+const unsigned int NAST_KEY_F9 = 0x96;
+const unsigned int NAST_KEY_F10 = 0x97;
+const unsigned int NAST_KEY_F11 = 0x98;
+const unsigned int NAST_KEY_F12 = 0x99;
+const unsigned int NAST_KEY_F13 = 0x9a;
+const unsigned int NAST_KEY_F14 = 0x9b;
+const unsigned int NAST_KEY_F15 = 0x9c;
+const unsigned int NAST_KEY_F16 = 0x9d;
+const unsigned int NAST_KEY_F17 = 0x9e;
+const unsigned int NAST_KEY_F18 = 0x9f;
+const unsigned int NAST_KEY_F19 = 0xa0;
+const unsigned int NAST_KEY_F20 = 0xa1;
+const unsigned int NAST_KEY_F21 = 0xa2;
+const unsigned int NAST_KEY_F22 = 0xa3;
+const unsigned int NAST_KEY_F23 = 0xa4;
+const unsigned int NAST_KEY_F24 = 0xa5;
+const unsigned int NAST_KEY_F25 = 0xa6;
+const unsigned int NAST_KEY_F26 = 0xa7;
+const unsigned int NAST_KEY_F27 = 0xa8;
+const unsigned int NAST_KEY_F28 = 0xa9;
+const unsigned int NAST_KEY_F29 = 0xaa;
+const unsigned int NAST_KEY_F30 = 0xab;
+const unsigned int NAST_KEY_F31 = 0xac;
+const unsigned int NAST_KEY_F32 = 0xad;
+const unsigned int NAST_KEY_F33 = 0xae;
+const unsigned int NAST_KEY_F34 = 0xaf;
+const unsigned int NAST_KEY_F35 = 0xb0;
+const unsigned int NAST_KEY_F36 = 0xb1;
+const unsigned int NAST_KEY_F37 = 0xb2;
+const unsigned int NAST_KEY_F38 = 0xb3;
+const unsigned int NAST_KEY_F39 = 0xb4;
+const unsigned int NAST_KEY_F40 = 0xb5;
+const unsigned int NAST_KEY_F41 = 0xb6;
+const unsigned int NAST_KEY_F42 = 0xb7;
+const unsigned int NAST_KEY_F43 = 0xb8;
+const unsigned int NAST_KEY_F44 = 0xb9;
+const unsigned int NAST_KEY_F45 = 0xba;
+const unsigned int NAST_KEY_F46 = 0xbb;
+const unsigned int NAST_KEY_F47 = 0xbc;
+const unsigned int NAST_KEY_F48 = 0xbd;
+const unsigned int NAST_KEY_F49 = 0xbe;
+const unsigned int NAST_KEY_F50 = 0xbf;
+const unsigned int NAST_KEY_F51 = 0xc0;
+const unsigned int NAST_KEY_F52 = 0xc1;
+const unsigned int NAST_KEY_F53 = 0xc2;
+const unsigned int NAST_KEY_F54 = 0xc3;
+const unsigned int NAST_KEY_F55 = 0xc4;
+const unsigned int NAST_KEY_F56 = 0xc5;
+const unsigned int NAST_KEY_F57 = 0xc6;
+const unsigned int NAST_KEY_F58 = 0xc7;
+const unsigned int NAST_KEY_F59 = 0xc8;
+const unsigned int NAST_KEY_F60 = 0xc9;
+const unsigned int NAST_KEY_F61 = 0xca;
+const unsigned int NAST_KEY_F62 = 0xcb;
+const unsigned int NAST_KEY_F63 = 0xcc;
 
 // The goal is to imitate masquerade as xterm.  Everything seems to work with
 // xterm.  That's funny, because it used to be that xterm worked with
@@ -376,6 +364,7 @@ key_map_t *keymap[] = {
     (key_map_t[]){{ALTIFY | CTRL_, K("\x7f")}, {0, K("\b")}}, // NAST_KEY_BKSP
     (key_map_t[]){{0, K("\r")}}, // NAST_KEY_ENTER
     (key_map_t[]){{SHIFT, K("\x1b[Z")}, {ALT, K("\xc2\x89")}, {0, K("\t")}}, // NAST_KEY_TAB
+    (key_map_t[]){{0, K("\x1b")}}, // NAST_KEY_ESC
 
     (key_map_t[]){{0, MODS("\x1b[1;%dA", CURS("\x1bOA", "\x1b[A"))}}, // NAST_KEY_UP
     (key_map_t[]){{0, MODS("\x1b[1;%dB", CURS("\x1bOB", "\x1b[B"))}}, // NAST_KEY_DN
