@@ -69,7 +69,7 @@ typedef struct {
 // (note this does not work with ALTIFY at all)
 // (see man 5 user_caps)
 #define MODS(on, off) &(key_action_t){ \
-    .type=KEY_ACTION_APPCURSOR, \
+    .type=KEY_ACTION_MODS, \
     .val={ \
         .mods={K(on), off} \
     } \
