@@ -1688,6 +1688,72 @@ csihandle(Term *t)
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         tcursor(t, CURSOR_LOAD);
         break;
+    case 't': /* Window manipulation (XTWINOPS) */
+        if(csiescseq.priv || csiescseq.submode) goto unknown;
+        if(csiescseq.narg < 1) goto unknown;
+        switch(csiescseq.arg[0]){
+            case 1: // de-iconify window
+            case 2: // iconify window
+            case 3: // (x, y) ->  Move window to [x, y]
+            case 4: /* (h, w) ->  resize to given h,w in pixels.
+                       Omitted parameters reuse the current height or width.
+                       Zero parameters use the display's height or width. */
+            case 5: // Raise the window to the front of the stack.
+            case 6: // Lower the window to the bottom of the stack.
+            case 7: // Refresh window.
+            case 8: /* (h, w) ->  resize to given h,w in characters.
+                       Omitted parameters reuse the current height or width.
+                       Zero parameters use the display's height or width. */
+            case 9: /* 9;0 -> Restore maximized window
+                       9;1 -> Maximize window
+                       9;2 -> Maximize window vertically
+                       9;3 -> Maximize window hoorizontally */
+            case 10: /* 10;0 -> undo full-screen mode
+                        10;1 -> change to full-screen mode
+                        10;2 -> toggle full-screen mode */
+            case 11: /* report xterm window state.
+                        If non-iconified, it returns CSI 1 t
+                        If iconified, it returns CSI 2 t */
+            case 13: /* 13   -> report window position (note: X11 specific)
+                        13;2 -> report text area position
+                        Result is CSI 3 ; x ; y t */
+            case 14: /* 14   -> Report xterm text area size in pixels
+                        14;2 -> report window size in pixels
+                        Result is CSI 4 ; h ; w t */
+
+            case 15: /* Report size of the screen in pixels.
+                        Result is CSI 5 ; h ; w t */
+            case 16: /* Report xterm character cell size in pixels.
+                        Result is CSI 6 ; h ; w t */
+            case 18: /* Report size of text area in characters.
+                        Result is CSI 8 ; h ; w t */
+            case 19: /* Report size of the screen in characters.
+                        Result is CSI 9 ; h ; w t */
+            case 20: /* Report window icon label.
+                        Result is OSC L label ST */
+            case 21: /* Report window title.
+                        Result is OSC l label ST */
+                // these are commands we might respect if there is a need
+                goto unknown;
+
+            case 22: /* 22;0 -> Save icon and window title on stack.
+                        22;1 -> Save icon title on stack.
+                        22;2 -> Save window title on stack. */
+            case 23: /* 23;0 ->  Restore icon and window title from stack
+                        23;1 ->  Restore icon title from stack.
+                        23;2 ->  Restore window title from stack. */
+                // these are commands we don't care to support
+                break;
+
+            default:
+                if(csiescseq.arg[0] >= 24){
+                    // DECSLPP: resize to nrows=csiescseq.arg[0]
+                    // xterm adapts this by resizing its window
+                }else{
+                    goto unknown;
+                }
+        }
+        break;
     case 'q':
         if(csiescseq.priv) goto unknown;
         switch (csiescseq.submode) {
