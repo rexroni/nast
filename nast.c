@@ -19,6 +19,34 @@
 
 #include "nast.h"
 
+/* vtiden: identification sequence returned in DA and DECID
+   see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+   search for "Send Device Attributes"
+
+   We use the exact value that xterm gives.
+
+   The initial 64 indicates VT420 features.
+
+   Supported subfeatures:
+     1   ->  132-columns.
+     2   ->  Printer.
+     6   ->  Selective erase.
+     9   ->  National Replacement Character sets.
+     15  ->  Technical characters.
+     16  ->  Locator port.
+     17  ->  Terminal state interrogation.
+     18  ->  User windows.
+     21  ->  Horizontal scrolling.
+     22  ->  ANSI color, e.g., VT525.
+     28  ->  Rectangular editing.
+   Unsupported subfeatures:
+     3   ->  ReGIS graphics.
+     4   ->  Sixel graphics.
+     8   ->  User-defined keys.
+     29  ->  ANSI text locator (i.e., DEC Locator mode).
+*/
+char *vtiden = "\033[?64;1;2;6;9;15;16;17;18;21;22;28c";
+
 #if   defined(__linux)
  #include <pty.h>
 #elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
@@ -1641,8 +1669,7 @@ csihandle(Term *t)
     case 'n': /* DSR – Device Status Report (cursor position) */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         if (csiescseq.arg[0] == 6) {
-            len = snprintf(buf, sizeof(buf),"\033[%i;%iR",
-                    t->c.y+1, t->c.x+1);
+            len = snprintf(buf, sizeof(buf),"\033[%i;%iR", t->c.y+1, t->c.x+1);
             t->hooks->ttywrite(t->hooks, buf, len);
         }
         break;

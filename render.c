@@ -12,8 +12,6 @@
 
 #include "config.h"
 
-static gboolean tty_io(GIOChannel *src, GIOCondition cond, gpointer user_data);
-
 typedef struct {
     // hooks pointer, must be the first element
     THooks hooks;
@@ -36,9 +34,13 @@ typedef struct {
 // sigchld needs to know the globals I guess?
 globals_t *G;
 
-static void die_on_ttywrite(THooks *thooks, const char *buf, size_t len){
-    (void)thooks; (void)buf; (void)len;
-    die("we don't support tty writes from the terminal yet\n");
+// forward declarations
+static gboolean tty_io(GIOChannel *src, GIOCondition cond, gpointer user_data);
+void ttywrite(globals_t *g, const char *s, size_t n, int may_echo);
+
+static void ttywrite_hook(THooks *thooks, const char *buf, size_t len){
+    globals_t *g = (globals_t*)thooks;
+    ttywrite(g, buf, len, 0);
 }
 
 static void ttyresize_hook(THooks *thooks, int row, int col){
@@ -651,7 +653,7 @@ void sigchld(int a){
 int main(int argc, char *argv[]){
     globals_t g = {
         .hooks = {
-            .ttywrite = die_on_ttywrite,
+            .ttywrite = ttywrite_hook,
             .ttyresize = ttyresize_hook,
             .ttyhangup = ttyhangup_hook,
             .bell = bell_hook,
