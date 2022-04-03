@@ -35,7 +35,7 @@ void show_characters_from_tty(int appcursor, int appkeypad){
         if(byte == 'q') break;
         int b = byte;
         if(b < 0) b += 256;
-        printf("dec = %d, hex = %x, char = %c\r\n", (int)b, (int)b, b);
+        printf("dec = %d, hex = %x, char = %c\r\n", b, b, (char)b);
     }
 
     if(appcursor){
