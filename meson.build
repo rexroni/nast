@@ -30,6 +30,11 @@ executable(
 )
 
 executable(
+  'scrape_xtgettcap',
+  ['scrape_xtgettcap.c'],
+)
+
+executable(
   'spysh',
   ['spysh.c'],
   dependencies: [cc.find_library('util')],
