@@ -635,6 +635,8 @@ ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
         die("tcgetattr() failed: %s\n", strerror(errno));
     }
     ttyattr.c_cc[VERASE] = '\b';
+    // xterm enables this, and we seem to support utf8
+    ttyattr.c_iflag |= IUTF8;
     if(tcsetattr(m, TCSADRAIN, &ttyattr)){
         die("tcsetattr() failed: %s\n", strerror(errno));
     }
