@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <cairo.h>
 #include <gtk/gtk.h>
 #include <cairo/cairo-xlib.h>
@@ -7,6 +8,7 @@
 
 #include "nast.h"
 #include "writable.h"
+#include "strs.h"
 
 #include "keymap.h"
 
@@ -550,12 +552,7 @@ static gboolean tty_read(GIOChannel *src, globals_t *g){
         case G_IO_STATUS_AGAIN: die("G_IO_STATUS_AGAIN during read\n"); break;
         case G_IO_STATUS_NORMAL: break;
     }
-    // printf("read: %s\n", buf);
-    // for(size_t i = 0; i < sizeof(buf) / sizeof(*buf); i++){
-    //     if(buf[i] < 128 && buf[i] > 31) continue;
-    //     if(buf[i] == '\n') continue;
-    //     buf[i] = 'X';
-    // }
+    // printf("tty_read: "); dumpstr(stdout, buf, bytes_read); printf("\n");
     twrite(g->term, buf, bytes_read, 0);
     // redraw
     gtk_widget_queue_draw(g->darea);

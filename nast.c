@@ -4,11 +4,12 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -18,6 +19,7 @@
 #include <wchar.h>
 
 #include "nast.h"
+#include "strs.h"
 
 /* vtiden: identification sequence returned in DA and DECID
    see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
