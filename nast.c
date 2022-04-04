@@ -21,6 +21,8 @@
 #include "nast.h"
 #include "strs.h"
 
+#include "xtgettcap.h"
+
 /* vtiden: identification sequence returned in DA and DECID
    see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
    search for "Send Device Attributes"
@@ -121,7 +123,6 @@ enum escape_state {
     ESC_STR_END    = 16, /* a final string was encountered */
     ESC_TEST       = 32, /* Enter in test mode */
     ESC_UTF8       = 64,
-    ESC_DCS        =128,
 };
 
 typedef struct {
@@ -1326,9 +1327,9 @@ tsetattr(Term *t, int *attr, int l)
             } else if (BETWEEN(attr[i], 100, 107)) {
                 t->c.attr.bg = rgb24_from_index(attr[i] - 100 + 8);
             } else {
-                fprintf(stderr,
-                    "erresc(default): gfx attr %d unknown\n",
-                    attr[i]);
+                fprintf(
+                    stderr, "erresc(default): gfx attr %d unknown: ", attr[i]
+                );
                 csidump();
             }
             break;
@@ -1824,6 +1825,38 @@ csireset(void)
 }
 
 void
+dcshandle(Term *t, STREscape strescseq)
+{
+    // see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+    // header Device-Control Functions
+    const char *buf = strescseq.buf;
+    size_t len = strescseq.len;
+
+    char c0 = len > 0 ? buf[0] : '\0';
+    char c1 = len > 1 ? buf[1] : '\0';
+
+    if(c0 == '+' && c1 == 'q'){
+        // XTGETTCAP: DCS '+' 'q' Pt [;Pt]... ST
+        // Pt is a hex-encoded string name
+
+        // Technically, this emits a separate response per request
+        // (like foot, see https://man.archlinux.org/man/foot.1.en#XTGETTCAP)
+        for(size_t i = 0; i < strescseq.narg; i++){
+            const char *temp = strescseq.args[i];
+            // the first arg has a +q at the front
+            if(i == 0) temp += 2;
+            size_t templen = strlen(temp);
+            const char *tcap = xtgettcap(temp, templen);
+            t->hooks->ttywrite(t->hooks, tcap, strlen(tcap));
+        }
+        return;
+    }
+
+    fprintf(stderr, "erresc: unknown DCS: ");
+    strdump();
+}
+
+void
 strhandle(Term *t)
 {
     char *buf;
@@ -1881,7 +1914,8 @@ strhandle(Term *t)
         t->hooks->set_title(t->hooks, strescseq.args[0]);
         return;
     case 'P': /* DCS -- Device Control String */
-        t->mode |= ESC_DCS;
+        dcshandle(t, strescseq);
+        return;
     case '_': /* APC -- Application Program Command */
     case '^': /* PM -- Privacy Message */
         return;
@@ -2291,6 +2325,7 @@ tputc(Term *t, Rune u)
             width = 1;
         }
     }
+    // printf("tputc("); dumpstr(stdout, c, len); printf(")\n");
 
     if (IS_SET(t, MODE_PRINT))
         tprinter(t, c, len);
@@ -2299,9 +2334,8 @@ tputc(Term *t, Rune u)
        following characters until it receives a ESC, a SUB, a ST or any other
        C1 control character. */
     if (t->esc & ESC_STR) {
-        if (u == '\a' || u == 030 || u == 032 || u == 033 ||
-           ISCONTROLC1(u)) {
-            t->esc &= ~(ESC_START|ESC_STR|ESC_DCS);
+        if (u == '\a' || u == 030 || u == 032 || u == 033 || ISCONTROLC1(u)) {
+            t->esc &= ~(ESC_START|ESC_STR);
             if (IS_SET(t, MODE_SIXEL)) {
                 /* TODO: render sixel */;
                 t->mode &= ~MODE_SIXEL;
@@ -2315,8 +2349,6 @@ tputc(Term *t, Rune u)
             /* TODO: implement sixel mode */
             return;
         }
-        if (t->esc&ESC_DCS && strescseq.len == 0 && u == 'q')
-            t->mode |= MODE_SIXEL;
 
         if (strescseq.len+len >= strescseq.siz) {
             /*
