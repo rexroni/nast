@@ -48,6 +48,8 @@
      29  ->  ANSI text locator (i.e., DEC Locator mode).
 */
 char *vtiden = "\033[?64;1;2;6;9;15;16;17;18;21;22;28c";
+// secondary device attributes, also taken from xterm
+char *vtiden2 = "\033[>41;372;0c";
 
 #if   defined(__linux)
  #include <pty.h>
@@ -1520,10 +1522,20 @@ csihandle(Term *t)
         }
         break;
     case 'c': /* DA -- Device Attributes */
-        if(csiescseq.priv || csiescseq.submode) goto unknown;
-        if (csiescseq.arg[0] == 0)
+        if(csiescseq.submode) goto unknown;
+        if(csiescseq.priv == '>'){
+            // secondary device attributes
+            t->hooks->ttywrite(t->hooks, vtiden2, strlen(vtiden2));
+            break;
+        }
+        if(csiescseq.priv) goto unknown;
+        if(csiescseq.narg == 0
+            || (csiescseq.narg == 0 && csiescseq.arg[0] == 0)
+        ){
             t->hooks->ttywrite(t->hooks, vtiden, strlen(vtiden));
-        break;
+            break;
+        }
+        goto unknown;
     case 'C': /* CUF -- Cursor <n> Forward */
     case 'a': /* HPR -- Cursor <n> Forward */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
