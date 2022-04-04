@@ -25,6 +25,11 @@ executable(
 )
 
 executable(
+  'test_strs',
+  ['test_strs.c'],
+)
+
+executable(
   'raw_inputs',
   ['raw_inputs.c'],
 )
