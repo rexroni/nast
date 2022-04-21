@@ -35,6 +35,11 @@ executable(
 )
 
 executable(
+  'read_tty_response',
+  ['read_tty_response.c', 'strs.c'],
+)
+
+executable(
   'scrape_xtgettcap',
   ['scrape_xtgettcap.c'],
 )
