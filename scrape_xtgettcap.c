@@ -30,7 +30,7 @@ int unhex(const char *buf, size_t len, char *bin, size_t limit){
         fprintf(stderr, "bad hex (len%%2 != 0): %.*s\r\n", (int)len, buf);
         return 1;
     }
-    if(len / 2 >= limit){
+    if(len / 2 > limit){
         fprintf(
             stderr, "bad hex (too long for buffer): %.*s\r\n", (int)len, buf
         );
