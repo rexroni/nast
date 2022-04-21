@@ -1725,7 +1725,7 @@ csihandle(Term *t)
             case 9: /* 9;0 -> Restore maximized window
                        9;1 -> Maximize window
                        9;2 -> Maximize window vertically
-                       9;3 -> Maximize window hoorizontally */
+                       9;3 -> Maximize window horizontally */
             case 10: /* 10;0 -> undo full-screen mode
                         10;1 -> change to full-screen mode
                         10;2 -> toggle full-screen mode */
@@ -1824,6 +1824,155 @@ csireset(void)
     memset(&csiescseq, 0, sizeof(csiescseq));
 }
 
+const char*
+decrqss(Term *t, const char *req, size_t len, char *buf, size_t size)
+{
+    const char *bad = "\x1bP0$r\x1b\\";
+    char c0 = len > 0 ? req[0] : '\0';
+    char c1 = len > 1 ? req[1] : '\0';
+    if(len > 2) return bad;
+    int l = 0;
+    #define CHARS(a, b) ((((int)a)<<8) + (int)b)
+    bool ok = true;
+    #define PRINTC(c) do{ if(l<size) buf[l++] = c; else ok = false; }while(0)
+    #define PRINTS(s) for(char *c = s; *c; c++) PRINTC(*c)
+    #define PRINTF(f, ...) do { \
+        if(l + 1 + snprintf(NULL, 0, f, __VA_ARGS__) < size){ \
+            l += snprintf(buf+l, size-l, f, __VA_ARGS__); \
+        }else{ \
+            ok = false; \
+        } \
+    } while(0)
+    l=0;
+    switch(CHARS(c0, c1)){
+        // SGR: "select graphics rendition" aka colors and stuff
+        case CHARS('m', '\0'):
+            PRINTS("\x1bP1$r0");
+            // boolean attributes
+            if(t->c.attr.mode & ATTR_BOLD) PRINTS(";1");
+            if(t->c.attr.mode & ATTR_FAINT) PRINTS(";2");
+            if(t->c.attr.mode & ATTR_ITALIC) PRINTS(";3");
+            if(t->c.attr.mode & ATTR_UNDERLINE) PRINTS(";4");
+            if(t->c.attr.mode & ATTR_BLINK) PRINTS(";5");
+            if(t->c.attr.mode & ATTR_REVERSE) PRINTS(";7");
+            if(t->c.attr.mode & ATTR_INVISIBLE) PRINTS(";8");
+            if(t->c.attr.mode & ATTR_STRUCK) PRINTS(";9");
+            struct rgb24 fg = t->c.attr.fg;
+            struct rgb24 bg = t->c.attr.bg;
+            // fg color
+            for(unsigned int i = 0; i < 256; i++){
+                if(!rgb24_eq(fg, rgb24_from_index(i))) continue;
+                if(i == 0){
+                    // default foreground and background, emit nothing
+                }else if(i < 8){
+                    // fg standard colors: 30-37
+                    PRINTF(";%u", i+30);
+                }else if(i < 16){
+                    // fg bright colors: 90-97
+                    PRINTF(";%u", i - 8 + 90);
+                }else{
+                    // fg set color by index
+                    PRINTF(";38;5;%u", i);
+                }
+                goto fg_found;
+            }
+            // fg set color by rgb
+            PRINTF(";38;2;%i;%i;%i", (int)fg.r, (int)fg.g, (int)fg.b);
+        fg_found:
+            // bg color
+            for(unsigned int i = 0; i < 256; i++){
+                if(rgb24_eq(bg, rgb24_from_index(i))){
+                    if(i < 8){
+                        // bg standard colors: 40-47
+                        PRINTF(";%u", i+40);
+                    }else if(i < 16){
+                        // bg bright colors: 100-107
+                        PRINTF(";%u", i - 8 + 100);
+                    }else{
+                        // bg set color by index
+                        PRINTF(";48;5;%u", i);
+                    }
+                    goto bg_found;
+                }
+            }
+            // bg set color by rgb
+            PRINTF(";48;2;%i;%i;%i", (int)bg.r, (int)bg.g, (int)bg.b);
+        bg_found:
+            PRINTS("m\x1b\\");
+            PRINTC('\0');
+            return ok ? buf : NULL;
+
+        // DECSCUSR: Set cursor style
+        // 0, 1: blinking block
+        // 2:    steady block
+        // 3:    blinking underline
+        // 4:    steady underline
+        // 5:    blinking bar
+        // 6:    steady bar
+        case CHARS(' ', 'q'):
+            // TODO: support DECSCUSR
+            PRINTF("\x1bP1$r%d q\x1b\\", 2);
+            return ok ? buf : NULL;
+
+        // DECSCA: Select character protection attribute
+        // 0,2: DECSED/DECSEL can erase
+        // 1: DECSED/DECSEL cannot erase
+        case CHARS('"', 'q'):
+            // TODO: support DECSCA
+            PRINTF("\x1bP1$r%d\"q\x1b\\", 0);
+            return ok ? buf : NULL;
+
+
+        // DECSTBM: set scrolling region (set top/bottom margins)
+        case CHARS('r', '\0'):
+            PRINTF("\x1bP1$%d;%dr\x1b\\", t->top + 1, t->bot + 1);
+            return ok ? buf : NULL;
+
+        // DECSLRM: set left and right margins, when DECLRMM is enabled
+        case CHARS('s', '\0'):
+            // TODO: support DECLRMM
+            PRINTF("\x1bP1$%d;%dr\x1b\\", 1, t->col);
+            return ok ? buf : NULL;
+
+        // DECSLPP: resize window (lines per page)
+        // Presumably this is designed to affect page up/down, but xterm
+        // says it adapts this value by resizing the window to N+1 total lines.
+        // Note: there is no plan to allow CLI applications resize the window.
+        case CHARS('t', '\0'):
+            PRINTF("\x1bP1$r%dt\x1b\\", t->row-1);
+            return ok ? buf : NULL;
+
+        // DECSCPP: set columns per page (affects page left/right)
+        // 0, 80: 80 columns per page
+        // 132: 132 columns per page
+        case CHARS('$', '|'):
+            // TODO: support this?  Not actually sure how to page left or right
+            PRINTF("\x1bP1$r%d$|\x1b\\", 80);
+            return ok ? buf : NULL;
+
+        // DECSNLS: set number of lines per screen
+        // xterm resizes itself, to handle this, which we don't support
+        case CHARS('*', '|'):
+            PRINTF("\x1bP1$r%d*|\x1b\\", t->row);
+            return ok ? buf : NULL;
+
+        // DECSCL "set conformance level", which we don't support.  We always
+        // respond with 64;1 (VT400 conformance level, 7-bit controls).
+        // TODO: support S8C1T / S7C1T (emit 8bit/7bit control characters)
+        case CHARS('"', 'p'):
+            return "\x1bP1$r64;1\"p\x1b\\";
+
+        // This ones aren't even honored in real-life xterm
+        // case CHARS('$', '}'): return "\x1bP1$r\x1b\\"; // DECSASD
+        // case CHARS('$', '~'): return "\x1bP1$r\x1b\\"; // DECSSDT
+    }
+    return bad;
+    #undef PRINTF
+    #undef PRINTS
+    #undef PRINTC
+    #undef CHARS
+}
+
 void
 dcshandle(Term *t, STREscape strescseq)
 {
@@ -1850,6 +1999,16 @@ dcshandle(Term *t, STREscape strescseq)
             t->hooks->ttywrite(t->hooks, tcap, strlen(tcap));
         }
         return;
+    }
+    if(c0 == '$' && c1 == 'q'){
+        // Request Status String (DECRQSS)
+        // respond: DCS 1 $ r Pt ST, where Pt is the CSI string operation
+        char mem[1024];
+        const char *resp = decrqss(t, buf+2, len-2, mem, sizeof(mem));
+        if(!resp){
+            die("decqss buffer was too short for string!");
+        }
+        t->hooks->ttywrite(t->hooks, resp, strlen(resp));
     }
 
     fprintf(stderr, "erresc: unknown DCS: ");
@@ -2106,15 +2265,21 @@ tstrsequence(Term *t, uchar c)
     switch (c) {
     case 0x90:   /* DCS -- Device Control String */
         c = 'P';
-        t->esc |= ESC_DCS;
+        // TODO: support 8-bit
+        // It seems that 0x90 never makes it here at all.  It seems st also has
+        // this problem so I don't think I introduced it.
+        die("fix 8-bit controls");
         break;
     case 0x9f:   /* APC -- Application Program Command */
+        die("fix 8-bit controls");
         c = '_';
         break;
     case 0x9e:   /* PM -- Privacy Message */
+        die("fix 8-bit controls");
         c = '^';
         break;
     case 0x9d:   /* OSC -- Operating System Command */
+        die("fix 8-bit controls");
         c = ']';
         break;
     }
@@ -3226,4 +3391,8 @@ struct rgb24 rgb24_from_index(unsigned int index){
 
     fprintf(stderr, "warning: color index exceeds 255: %d\n", index);
     return (struct rgb24){255, 255, 255};
+}
+
+bool rgb24_eq(struct rgb24 a, struct rgb24 b){
+    return a.r == b.r && a.g == b.g && a.b == b.b;
 }

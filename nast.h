@@ -41,7 +41,6 @@ enum glyph_attribute {
     ATTR_WRAP       = 1 << 8,
     ATTR_WIDE       = 1 << 9,
     ATTR_WDUMMY     = 1 << 10,
-    ATTR_BOLD_FAINT = ATTR_BOLD | ATTR_FAINT,
     ATTR_NORENDER   = 1 << 11,
 };
 
@@ -213,6 +212,7 @@ extern struct rgb24 defaultfg;
 extern struct rgb24 defaultbg;
 
 struct rgb24 rgb24_from_index(unsigned int index);
+bool rgb24_eq(struct rgb24 a, struct rgb24 b);
 
 //////
 
