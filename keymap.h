@@ -205,8 +205,7 @@ const unsigned int NAST_KEY_F63 = 0xcc;
 // is just utf8-encoding of 'v' with the 8th bit set.  `man xterm` has a
 // section about eightBitInput that explains the set meta mode (smm) and
 // reset meta mode (rmm) capabilities.  It seems st and urxvt both have the
-// equivalent of the metaSendsEscape feature turned on permanently.  I
-// would be ok always emitting escape+keys for the non-special keys.
+// equivalent of the metaSendsEscape feature turned on permanently.
 // Note that metaSendsEscape does _not_ alter the behavior of the special
 // keys, like kHOM.
 //

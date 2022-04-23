@@ -752,10 +752,6 @@ int main(int argc, char *argv[]){
     guint rd_event_src_id = g_io_add_watch(ttychan, cond, tty_io, &g);
     (void)rd_event_src_id;
 
-    // write some shit
-    char buf[] = "\x1b[35mhello\x1b[m \x1b[45mworld\x1b[m!\r\nthis \x1b[45mis a\r\n\x1b[30mtest\x1b[m\r\n";
-    twrite(g.term, buf, sizeof(buf) - 1,  0);
-
     gtk_main();
 
     return 0;
