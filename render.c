@@ -25,6 +25,21 @@ typedef struct {
     bool appkeypad;
     bool want_focus;
 
+    struct {
+        // 0 = off, 1 = alt/meta, 2 = ctrl/shift/alt/meta
+        int lvl;
+        /* to support im_ctx, we decide what modify_other would send, then we
+           give the im_ctx a chance to consume it, and if it emits what we
+           expected then we substitute the buf in for the character.  If an
+           input method existed which consumed multiple regular characters and
+           emitted chunks of them in sequence, this would break down, but that
+           seems unlikely to happen soon, since input methods are designed for
+           east asian languages and the like. */
+        char expect;
+        char buf[32];
+        size_t len;
+    } modify_other;
+
     GtkIMContext *im_ctx;
     int ttyfd;
     struct writable writable;
@@ -124,6 +139,16 @@ void set_clipboard(THooks *thooks, char *buf, size_t len){
     free(buf);
     (void)len;
     die("set_clipboard() not handled\n");
+}
+
+void set_modify_other(THooks *thooks, int lvl){
+    globals_t *g = (globals_t*)thooks;
+    g->modify_other.lvl = lvl;
+    if(lvl == 0){
+        // reset any state
+        g->modify_other.len = 0;
+        g->modify_other.expect = '\0';
+    }
 }
 
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
@@ -258,7 +283,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
     globals_t *g = user_data;
 
     // some things will wrongly be captured by the im_context, like keypad
-    if(event_key->type == GDK_KEY_PRESS){
+    if(false && event_key->type == GDK_KEY_PRESS){
         bool x = g->appkeypad;
         switch(event_key->keyval){
             // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-8
@@ -293,6 +318,38 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 ttywrite(g, x ? "\x1bOy" : "9", x ? 3 : 1, 0);
                 return TRUE;
 
+            // keypad keys: 789 456 123 0 (without numpad)
+            case GDK_KEY_KP_Home:
+                ttywrite(g, x ? "X" : "\x1b[H", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_Up:
+                ttywrite(g, x ? "X" : "\x1b[A", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_Page_Up:
+                ttywrite(g, x ? "X" : "\x1b[5~", x ? 1 : 4, 0);
+                return TRUE;
+            case GDK_KEY_KP_Left:
+                ttywrite(g, x ? "X" : "\x1b[D", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_Begin:
+                ttywrite(g, x ? "X" : "\x1b[E", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_Right:
+                ttywrite(g, x ? "X" : "\x1b[C", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_End:
+                ttywrite(g, x ? "X" : "\x1b[F", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_Down:
+                ttywrite(g, x ? "X" : "\x1b[B", x ? 1 : 3, 0);
+                return TRUE;
+            case GDK_KEY_KP_Page_Down:
+                ttywrite(g, x ? "X" : "\x1b[6~", x ? 1 : 4, 0);
+                return TRUE;
+            case GDK_KEY_KP_Insert:
+                ttywrite(g, x ? "X" : "\x1b[2~", x ? 1 : 4, 0);
+                return TRUE;
+
             // GDK_KEY_KP_Separator seems to never appear.
             // (KEY_KPCOMMA is coming through GTK as GDK_KEY_KP_Decimal...?)
             // Probably this is fine since modern numpads have no comma.
@@ -306,14 +363,13 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                 ttywrite(g, x ? "\x1bOn" : ".", x ? 3 : 1, 0);
                 return TRUE;
 
-            // return key is handled later for non-appkey mode
+            // return key is handled later for non-appkeypad mode
             case GDK_KEY_KP_Enter:
                 if(x){
                     ttywrite(g, "\x1bOM", 3, 0);
                     return TRUE;
                 }
                 break;
-
 
             // apparently none of [*+/] are special
             // case GDK_KEY_KP_Multiply:
@@ -322,20 +378,79 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
         }
     }
 
-    if(gtk_im_context_filter_keypress(g->im_ctx, event_key)){
-        return TRUE;
-    }
+    bool ctrl = event_key->state & GDK_CONTROL_MASK;
+    bool shift = event_key->state & GDK_SHIFT_MASK;
+    bool alt = event_key->state & GDK_MOD1_MASK;
+    bool meta = event_key->state & GDK_META_MASK;
+
+    bool modify_other = false;
+    if(g->modify_other.lvl > 0) modify_other |= alt | meta;
+    if(g->modify_other.lvl == 2) modify_other |= shift | ctrl;
+
+    // if(
+    //     modify_other
+    //     && !event_key->is_modifier
+    //     && event_key->type == GDK_KEY_PRESS
+    //     && event_key->keyval >= 32
+    //     && event_key->keyval < 128
+    //     /* mysteriously, xterm omits the modifyOther behavior when pressing
+    //        only shift for ascii characters greater than 32 (' ') and less than
+    //        64 ('@') so we imitate that here */
+    //     && !(
+    //             event_key->keyval > 32
+    //             && event_key->keyval < 64
+    //             && event_key->state == GDK_SHIFT_MASK
+    //     )
+    // ){
+    //     /* If modifyOtherKeys is on, we figure out what we would emit for
+    //        modify_other, then remember that in case the im_ctx decides to not
+    //        do anything special with the character.  If it doesn't do anything
+    //        special, we interecept the output in im_commit() and substitute the
+    //        buffer we store here.  We do this whole dance because we don't want
+    //        modify_other to disable all input methods or applications like vim
+    //        would basically never work with im_ctx. */
+    //     // XXX: these cases were only tested with modifyOtherKeys=2
+    //     // XXX: what about modifyOtherKeys=1?
+    //     /* interesting test cases for modifyOtherKeys=2:
+    //         space, shift+space, ctrl+shift+space
+    //         1, !, ctrl+!
+    //         /, ?, ctrl+?
+    //         2, @, ctrl+@
+    //         a, A, ctrl+A
+    //         h, H, ctrl+H, ctrl+h  (xterm specifically mentions this)
+    //         i, I, ctrl+I, ctrl+i  (xterm specifically mentions this)
+    //         m, M, ctrl+M, ctrl+m  (xterm specifically mentions this)
+    //         tab, shift+tab, ctrl+shift+tab
+    //         esc, shift+esc, ctrl+shift+esc
+    //         backspace, shift+backspace, ctrl+shift+backspace */
+
+    //     // TODO: does xterm work with input methods?
+    //     // XXX: need to special case the backspace, tab, and escape keys
+    //     /* XXX: WTF, xterm docs clearly specifically say that shift-tab should
+    //        not emit a CSI Z but it still does */
+    //     int mod_idx = 1 + shift + 2*alt + 4*ctrl + 8*meta;
+    //     int len = snprintf(
+    //         g->modify_other.buf,
+    //         sizeof(g->modify_other.buf),
+    //         "\x1b[27;%d;%d~",
+    //         mod_idx,
+    //         event_key->keyval
+    //     );
+    //     if(len < 1) die("snprintf failed");
+    //     if(len >= sizeof(g->modify_other.buf)) die("modify_other overflow");
+    //     g->modify_other.len = (size_t)len;
+    //     g->modify_other.expect = event_key->keyval;
+    // }
+
+    // if(gtk_im_context_filter_keypress(g->im_ctx, event_key)){
+    //     return TRUE;
+    // }
 
     // ignore modifier keys themselves, let GTK track their state
     if(event_key->is_modifier) return TRUE;
 
     // ignore releases
     if(event_key->type != GDK_KEY_PRESS) return TRUE;
-
-    bool ctrl = event_key->state & GDK_CONTROL_MASK;
-    bool shift = event_key->state & GDK_SHIFT_MASK;
-    bool alt = event_key->state & GDK_MOD1_MASK;
-    bool meta = event_key->state & GDK_META_MASK;
 
     size_t key_idx = (size_t)-1;
     if(event_key->keyval < 128){
@@ -346,16 +461,12 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
         switch(event_key->keyval){
             // see gtk-3.0/gdk/gdkkeysyms.h
             case GDK_KEY_Home:      key_idx = NAST_KEY_HOME; break;
-            case GDK_KEY_KP_End:
             case GDK_KEY_End:       key_idx = NAST_KEY_END; break;
             case GDK_KEY_Insert:    key_idx = NAST_KEY_INSERT; break;
             case GDK_KEY_Delete:    key_idx = NAST_KEY_DELETE; break;
-            case GDK_KEY_KP_Page_Up:
             case GDK_KEY_Page_Up:   key_idx = NAST_KEY_PGUP; break;
-            case GDK_KEY_KP_Page_Down:
             case GDK_KEY_Page_Down: key_idx = NAST_KEY_PGDN; break;
             case GDK_KEY_BackSpace: key_idx = NAST_KEY_BKSP; break;
-            case GDK_KEY_KP_Enter:
             case GDK_KEY_Return:    key_idx = NAST_KEY_ENTER; break;
             case GDK_KEY_ISO_Left_Tab:
             case GDK_KEY_KP_Tab:
@@ -364,8 +475,39 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
 
             case GDK_KEY_Up:        key_idx = NAST_KEY_UP; break;
             case GDK_KEY_Down:      key_idx = NAST_KEY_DN; break;
-            case GDK_KEY_Left:      key_idx = NAST_KEY_LEFT; break;
             case GDK_KEY_Right:     key_idx = NAST_KEY_RIGHT; break;
+            case GDK_KEY_Left:      key_idx = NAST_KEY_LEFT; break;
+
+            case GDK_KEY_KP_0:      key_idx = NAST_KEY_KP0; break;
+            case GDK_KEY_KP_1:      key_idx = NAST_KEY_KP1; break;
+            case GDK_KEY_KP_2:      key_idx = NAST_KEY_KP2; break;
+            case GDK_KEY_KP_3:      key_idx = NAST_KEY_KP3; break;
+            case GDK_KEY_KP_4:      key_idx = NAST_KEY_KP4; break;
+            case GDK_KEY_KP_5:      key_idx = NAST_KEY_KP5; break;
+            case GDK_KEY_KP_6:      key_idx = NAST_KEY_KP6; break;
+            case GDK_KEY_KP_7:      key_idx = NAST_KEY_KP7; break;
+            case GDK_KEY_KP_8:      key_idx = NAST_KEY_KP8; break;
+            case GDK_KEY_KP_9:      key_idx = NAST_KEY_KP9; break;
+
+            case GDK_KEY_KP_Multiply: key_idx = NAST_KEY_KPASTERISK; break;
+            case GDK_KEY_KP_Subtract: key_idx = NAST_KEY_KPMINUS; break;
+            case GDK_KEY_KP_Add:      key_idx = NAST_KEY_KPPLUS; break;
+            case GDK_KEY_KP_Decimal:  key_idx = NAST_KEY_KPCOMMA; break;
+            case GDK_KEY_KP_Divide:   key_idx = NAST_KEY_KPSLASH; break;
+            case GDK_KEY_KP_Enter:    key_idx = NAST_KEY_KPENTER; break;
+
+            case GDK_KEY_KP_Insert:    key_idx = NAST_KEY_KP0u; break;
+            case GDK_KEY_KP_End:       key_idx = NAST_KEY_KP1u; break;
+            case GDK_KEY_KP_Down:      key_idx = NAST_KEY_KP2u; break;
+            case GDK_KEY_KP_Page_Down: key_idx = NAST_KEY_KP3u; break;
+            case GDK_KEY_KP_Left:      key_idx = NAST_KEY_KP4u; break;
+            case GDK_KEY_KP_Begin:     key_idx = NAST_KEY_KP5u; break;
+            case GDK_KEY_KP_Right:     key_idx = NAST_KEY_KP6u; break;
+            case GDK_KEY_KP_Home:      key_idx = NAST_KEY_KP7u; break;
+            case GDK_KEY_KP_Up:        key_idx = NAST_KEY_KP8u; break;
+            case GDK_KEY_KP_Page_Up:   key_idx = NAST_KEY_KP9u; break;
+
+            case GDK_KEY_KP_Delete:    key_idx = NAST_KEY_KPCOMMAu; break;
 
             case GDK_KEY_KP_F1:
             case GDK_KEY_F1:        key_idx = NAST_KEY_F1; break;
@@ -440,7 +582,7 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
                     // restart the loop with the new key action
                     continue;
 
-                case KEY_ACTION_APPKEY:
+                case KEY_ACTION_APPKEYPAD:
                     act = act->val.appcursor[!g->appkeypad];
                     // restart the loop with the new key action
                     continue;
@@ -524,9 +666,20 @@ static gboolean on_focus_out(
 static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
     // printf("commit! (%s)\n", str);
     globals_t *g = user_data;
-    ttywrite(g, str, strlen(str), 0);
-    // twrite(str, strlen(str), 0);
-    gtk_widget_queue_draw(g->darea);
+    size_t len_in = strlen(str);
+    if(
+        g->modify_other.lvl
+        && g->modify_other.len
+        && len_in == 1
+        && str[0] == g->modify_other.expect
+    ){
+        ttywrite(g, g->modify_other.buf, g->modify_other.len, 0);
+        // consume the modify_other buffer
+        g->modify_other.expect = '\0';
+        g->modify_other.len = 0;
+        return;
+    }
+    ttywrite(g, str, len_in, 0);
 }
 
 static void im_preedit_start(GtkIMContext *im_ctx, gpointer user_data){
@@ -689,6 +842,7 @@ int main(int argc, char *argv[]){
             .set_mode = set_mode,
             .set_title = set_title,
             .set_clipboard = set_clipboard,
+            .set_modify_other = set_modify_other,
         },
     };
     G = &g;
@@ -703,7 +857,6 @@ int main(int argc, char *argv[]){
     // GTK input handling: developer.gnome.org/gtk3/stable/chap-input-handling.html
     g_signal_connect(G_OBJECT(g.darea), "draw", G_CALLBACK(on_draw_event), &g);
     g_signal_connect(G_OBJECT(g.window), "destroy", G_CALLBACK(gtk_main_quit), &g);
-
 
     // configure the input method
     g.im_ctx = gtk_im_context_simple_new();
@@ -733,8 +886,10 @@ int main(int argc, char *argv[]){
     // create the terminal
     tnew(&g.term, 80, 40, "monospace 10", (THooks*)&g);
 
-    // g.ttyfd = ttynew(g.term, NULL, "/bin/sh", NULL, (char*[]){"cat", NULL});
-    g.ttyfd = ttynew(g.term, &g.pid, NULL, shell, NULL, NULL);
+    char **cmd = argc > 1 ? argv+1 : NULL;
+    g.ttyfd = ttynew(g.term, &g.pid, cmd);
+    (void)shell;
+    // g.ttyfd = ttynew(g.term, &g.pid, NULL, NULL, NULL, NULL);
     signal(SIGCHLD, sigchld);
 
     // add the ttyfd to the main loop

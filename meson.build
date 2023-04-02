@@ -54,3 +54,6 @@ executable(
   'dumptermios',
   ['dumptermios.c'],
 )
+
+executable('io', ['io.c'])
+executable('test-io', ['test-io.c'])

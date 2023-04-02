@@ -235,8 +235,7 @@ typedef struct {
     int narg;              /* nb of args */
 } STREscape;
 
-static void execsh(char *, char **);
-static void stty(char **);
+static void execsh(char **);
 // static void ttywriteraw(t, const char *, size_t);
 
 static void csidump(void);
@@ -537,9 +536,9 @@ die(const char *errstr, ...)
 }
 
 void
-execsh(char *cmd, char **args)
+execsh(char **cmd)
 {
-    char *sh, *prog;
+    char *sh;
     const struct passwd *pw;
 
     errno = 0;
@@ -550,16 +549,20 @@ execsh(char *cmd, char **args)
             die("who are you?\n");
     }
 
-    if ((sh = getenv("SHELL")) == NULL)
-        sh = (pw->pw_shell[0]) ? pw->pw_shell : cmd;
-
-    if (args)
-        prog = args[0];
-    else if (utmp)
-        prog = utmp;
-    else
-        prog = sh;
-    DEFAULT(args, ((char *[]) {prog, NULL}));
+    char *cmdbuf[2] = {NULL, NULL};
+    if(cmd){
+        // noop
+    }else if((sh = getenv("SHELL"))){
+        cmdbuf[0] = sh;
+        cmd = cmdbuf;
+    }else if(pw->pw_shell[0]){
+        cmdbuf[0] = pw->pw_shell;
+        cmd = cmdbuf;
+    }else{
+        // fallback to /bin/sh
+        cmdbuf[0] = "/bin/sh";
+        cmd = cmdbuf;
+    }
 
     unsetenv("COLUMNS");
     unsetenv("LINES");
@@ -577,58 +580,23 @@ execsh(char *cmd, char **args)
     signal(SIGTERM, SIG_DFL);
     signal(SIGALRM, SIG_DFL);
 
-    execvp("/bin/sh", (char*[]){"/bin/sh", NULL});
-    execvp(prog, args);
+    // execvp("/bin/sh", (char*[]){"/bin/sh", NULL});
+    FILE *f = fopen("log", "w");
+    fprintf(f, "executing:");
+    char **ptr = cmd;
+    while(*ptr){
+        fprintf(f, " %s", *(ptr++));
+    }
+    fprintf(f, "\n");
+    fflush(f);
+    execvp(cmd[0], cmd);
     _exit(1);
 }
 
-void
-stty(char **args)
-{
-    char cmd[_POSIX_ARG_MAX], **p, *q, *s;
-    size_t n, siz;
-
-    if ((n = strlen(stty_args)) > sizeof(cmd)-1)
-        die("incorrect stty parameters\n");
-    memcpy(cmd, stty_args, n);
-    q = cmd + n;
-    siz = sizeof(cmd) - n;
-    for (p = args; p && (s = *p); ++p) {
-        if ((n = strlen(s)) > siz-1)
-            die("stty parameter length too long\n");
-        *q++ = ' ';
-        memcpy(q, s, n);
-        q += n;
-        siz -= n + 1;
-    }
-    *q = '\0';
-    if (system(cmd) != 0)
-        perror("Couldn't call stty");
-}
-
 int
-ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
+ttynew(Term *t, pid_t *pid, char **cmd)
 {
     int m, s;
-
-    if (out) {
-        t->mode |= MODE_PRINT;
-        iofd = (!strcmp(out, "-")) ?
-              1 : open(out, O_WRONLY | O_CREAT, 0666);
-        if (iofd < 0) {
-            fprintf(stderr, "Error opening %s:%s\n",
-                out, strerror(errno));
-        }
-    }
-
-    if (line) {
-        if ((t->cmdfd = open(line, O_RDWR)) < 0)
-            die("open line '%s' failed: %s\n",
-                line, strerror(errno));
-        dup2(t->cmdfd, 0);
-        stty(args);
-        return t->cmdfd;
-    }
 
     /* seems to work fine on linux, openbsd and freebsd */
     if (openpty(&m, &s, NULL, NULL, NULL) < 0)
@@ -651,6 +619,7 @@ ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
         die("fork failed: %s\n", strerror(errno));
         break;
     case 0:
+        (void)die;
         close(iofd);
         setsid(); /* create a new process group */
         dup2(s, 0);
@@ -664,7 +633,7 @@ ttynew(Term *t, pid_t *pid, char *line, char *cmd, char *out, char **args)
         if (pledge("stdio getpw proc exec", NULL) == -1)
             die("pledge\n");
 #endif
-        execsh(cmd, args);
+        execsh(cmd);
         break;
     default:
 #ifdef __OpenBSD__
@@ -1415,6 +1384,9 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
             case 1034:
                 t->hooks->set_mode(t->hooks, MODE_8BIT, set);
                 break;
+            case 1035:
+                if(set) die("special modifiers for alt and numlock keys\n");
+                break;
             case 1049: /* swap screen & set/restore cursor as xterm */
                 tcursor(t, (set) ? CURSOR_SAVE : CURSOR_LOAD);
                 /* FALLTHROUGH */
@@ -1680,9 +1652,31 @@ csihandle(Term *t)
         if(csiescseq.submode) goto unknown;
         tsetmode(t, csiescseq.priv, 1, csiescseq.arg, csiescseq.narg);
         break;
-    case 'm': /* SGR -- Terminal attribute (color) */
-        if(csiescseq.priv || csiescseq.submode) goto unknown;
-        tsetattr(t, csiescseq.arg, csiescseq.narg);
+    case 'm':
+        if(csiescseq.submode) goto unknown;
+        if(csiescseq.priv == '>'){
+            // XTMODKEYS -- set/reset key modifier options
+            int lvl;
+            switch(csiescseq.arg[0]){
+                case 0: // modifyKeyboard
+                case 1: // modifyCursorKeys
+                case 2: // modifyFunctionKeys
+                    goto unknown;
+                case 4: // modifyOtherKeys
+                    lvl = csiescseq.arg[1];
+                    if(lvl < 0 || lvl > 2) goto unknown;
+                    t->hooks->set_modify_other(t->hooks, lvl);
+                    break;
+                default:
+                    goto unknown;
+            }
+        }else if(!csiescseq.priv){
+            // SGR -- Terminal attribute (color)
+            if(csiescseq.priv || csiescseq.submode) goto unknown;
+            tsetattr(t, csiescseq.arg, csiescseq.narg);
+        }else{
+            goto unknown;
+        }
         break;
     case 'n': /* DSR – Device Status Report (cursor position) */
         if(csiescseq.priv || csiescseq.submode) goto unknown;

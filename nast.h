@@ -149,6 +149,7 @@ struct THooks {
     void (*set_mode)(THooks*, enum win_mode, int);
     void (*set_title)(THooks*, const char *);
     void (*set_clipboard)(THooks*, char *buf, size_t len);
+    void (*set_modify_other)(THooks*, int lvl);
 };
 
 typedef union {
@@ -173,7 +174,7 @@ void tnew(Term **t, int col, int row, char *font_name, THooks *hooks);
 void tresize(Term *t, int, int);
 void tsetdirtattr(Term *t, int);
 void ttyhangup(pid_t);
-int ttynew(Term *t, pid_t *, char *, char *, char *, char **);
+int ttynew(Term *t, pid_t *pid, char **cmd);
 size_t ttyread(Term *t);
 
 bool t_isset_crlf(Term *t);

@@ -8,7 +8,8 @@
 
 #define APPCURSOR_ON "\x1b[?1h"
 #define APPCURSOR_OFF "\x1b[?1l"
-#define APPKEYPAD_ON "\x1b="
+// TODO: why does xterm start with weird numlock resource on?
+#define APPKEYPAD_ON "\x1b[?1035l\x1b="
 #define APPKEYPAD_OFF "\x1b>"
 
 void show_characters_from_tty(int appcursor, int appkeypad){
@@ -32,7 +33,13 @@ void show_characters_from_tty(int appcursor, int appkeypad){
 
     char byte;
     while(read(0, &byte, 1) == 1){
+        // "q"uit
         if(byte == 'q') break;
+        // "m"ark
+        if(byte == 'm'){
+            printf("-------------------\r\n");
+            continue;
+        }
         int b = byte;
         if(b < 0) b += 256;
         printf("dec = %d, hex = %x, char = %c\r\n", b, b, (char)b);

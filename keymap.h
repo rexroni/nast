@@ -7,7 +7,7 @@ typedef enum {
     KEY_ACTION_SIMPLE,
     KEY_ACTION_FUNC,
     KEY_ACTION_APPCURSOR,
-    KEY_ACTION_APPKEY,
+    KEY_ACTION_APPKEYPAD,
     KEY_ACTION_MODS,
 } key_action_type_e;
 
@@ -18,7 +18,7 @@ typedef union {
     simple_key_t simple;
     void (*func)(void *globals, GdkEventKey *event_key);
     key_action_t *appcursor[2];
-    key_action_t *appkey[2];
+    key_action_t *appkeypad[2];
     key_action_t *mods[2];
 } key_action_u;
 
@@ -59,9 +59,15 @@ typedef struct {
 
 // appkeypad
 #define KPAD(on, off) &(key_action_t){ \
-    .type=KEY_ACTION_APPKEY, \
+    .type=KEY_ACTION_APPKEYPAD, \
     .val={ \
         .appkeypad={K(on), K(off)} \
+    } \
+}
+#define KPADX(on, off) &(key_action_t){ \
+    .type=KEY_ACTION_APPKEYPAD, \
+    .val={ \
+        .appkeypad={on, off} \
     } \
 }
 
@@ -127,73 +133,106 @@ const unsigned int NAST_KEY_DN = 0x8b;
 const unsigned int NAST_KEY_RIGHT = 0x8c;
 const unsigned int NAST_KEY_LEFT = 0x8d;
 
-const unsigned int NAST_KEY_F1 = 0x8e;
-const unsigned int NAST_KEY_F2 = 0x8f;
-const unsigned int NAST_KEY_F3 = 0x90;
-const unsigned int NAST_KEY_F4 = 0x91;
-const unsigned int NAST_KEY_F5 = 0x92;
-const unsigned int NAST_KEY_F6 = 0x93;
-const unsigned int NAST_KEY_F7 = 0x94;
-const unsigned int NAST_KEY_F8 = 0x95;
-const unsigned int NAST_KEY_F9 = 0x96;
-const unsigned int NAST_KEY_F10 = 0x97;
-const unsigned int NAST_KEY_F11 = 0x98;
-const unsigned int NAST_KEY_F12 = 0x99;
-const unsigned int NAST_KEY_F13 = 0x9a;
-const unsigned int NAST_KEY_F14 = 0x9b;
-const unsigned int NAST_KEY_F15 = 0x9c;
-const unsigned int NAST_KEY_F16 = 0x9d;
-const unsigned int NAST_KEY_F17 = 0x9e;
-const unsigned int NAST_KEY_F18 = 0x9f;
-const unsigned int NAST_KEY_F19 = 0xa0;
-const unsigned int NAST_KEY_F20 = 0xa1;
-const unsigned int NAST_KEY_F21 = 0xa2;
-const unsigned int NAST_KEY_F22 = 0xa3;
-const unsigned int NAST_KEY_F23 = 0xa4;
-const unsigned int NAST_KEY_F24 = 0xa5;
-const unsigned int NAST_KEY_F25 = 0xa6;
-const unsigned int NAST_KEY_F26 = 0xa7;
-const unsigned int NAST_KEY_F27 = 0xa8;
-const unsigned int NAST_KEY_F28 = 0xa9;
-const unsigned int NAST_KEY_F29 = 0xaa;
-const unsigned int NAST_KEY_F30 = 0xab;
-const unsigned int NAST_KEY_F31 = 0xac;
-const unsigned int NAST_KEY_F32 = 0xad;
-const unsigned int NAST_KEY_F33 = 0xae;
-const unsigned int NAST_KEY_F34 = 0xaf;
-const unsigned int NAST_KEY_F35 = 0xb0;
-const unsigned int NAST_KEY_F36 = 0xb1;
-const unsigned int NAST_KEY_F37 = 0xb2;
-const unsigned int NAST_KEY_F38 = 0xb3;
-const unsigned int NAST_KEY_F39 = 0xb4;
-const unsigned int NAST_KEY_F40 = 0xb5;
-const unsigned int NAST_KEY_F41 = 0xb6;
-const unsigned int NAST_KEY_F42 = 0xb7;
-const unsigned int NAST_KEY_F43 = 0xb8;
-const unsigned int NAST_KEY_F44 = 0xb9;
-const unsigned int NAST_KEY_F45 = 0xba;
-const unsigned int NAST_KEY_F46 = 0xbb;
-const unsigned int NAST_KEY_F47 = 0xbc;
-const unsigned int NAST_KEY_F48 = 0xbd;
-const unsigned int NAST_KEY_F49 = 0xbe;
-const unsigned int NAST_KEY_F50 = 0xbf;
-const unsigned int NAST_KEY_F51 = 0xc0;
-const unsigned int NAST_KEY_F52 = 0xc1;
-const unsigned int NAST_KEY_F53 = 0xc2;
-const unsigned int NAST_KEY_F54 = 0xc3;
-const unsigned int NAST_KEY_F55 = 0xc4;
-const unsigned int NAST_KEY_F56 = 0xc5;
-const unsigned int NAST_KEY_F57 = 0xc6;
-const unsigned int NAST_KEY_F58 = 0xc7;
-const unsigned int NAST_KEY_F59 = 0xc8;
-const unsigned int NAST_KEY_F60 = 0xc9;
-const unsigned int NAST_KEY_F61 = 0xca;
-const unsigned int NAST_KEY_F62 = 0xcb;
-const unsigned int NAST_KEY_F63 = 0xcc;
+const unsigned int NAST_KEY_KP0 = 0x8e;
+const unsigned int NAST_KEY_KP1 = 0x8f;
+const unsigned int NAST_KEY_KP2 = 0x90;
+const unsigned int NAST_KEY_KP3 = 0x91;
+const unsigned int NAST_KEY_KP4 = 0x92;
+const unsigned int NAST_KEY_KP5 = 0x93;
+const unsigned int NAST_KEY_KP6 = 0x94;
+const unsigned int NAST_KEY_KP7 = 0x95;
+const unsigned int NAST_KEY_KP8 = 0x96;
+const unsigned int NAST_KEY_KP9 = 0x97;
 
-// The goal is to imitate masquerade as xterm.  Everything seems to work with
-// xterm.  That's funny, because it used to be that xterm worked with
-// everything, but it did that so well that now it's the other way around.
+const unsigned int NAST_KEY_KPASTERISK = 0x98;
+const unsigned int NAST_KEY_KPMINUS = 0x99;
+const unsigned int NAST_KEY_KPPLUS = 0x9a;
+const unsigned int NAST_KEY_KPCOMMA = 0x9b;
+const unsigned int NAST_KEY_KPSLASH = 0x9c;
+const unsigned int NAST_KEY_KPENTER = 0x9d;
+
+// "u"nlocked keypad numbers (without numlock set)
+const unsigned int NAST_KEY_KP0u = 0x9e;
+const unsigned int NAST_KEY_KP1u = 0x9f;
+const unsigned int NAST_KEY_KP2u = 0xa0;
+const unsigned int NAST_KEY_KP3u = 0xa1;
+const unsigned int NAST_KEY_KP4u = 0xa2;
+const unsigned int NAST_KEY_KP5u = 0xa3;
+const unsigned int NAST_KEY_KP6u = 0xa4;
+const unsigned int NAST_KEY_KP7u = 0xa5;
+const unsigned int NAST_KEY_KP8u = 0xa6;
+const unsigned int NAST_KEY_KP9u = 0xa7;
+
+const unsigned int NAST_KEY_KPCOMMAu = 0xa8;
+
+const unsigned int NAST_KEY_F1 = 0xa9;
+const unsigned int NAST_KEY_F2 = 0xaa;
+const unsigned int NAST_KEY_F3 = 0xab;
+const unsigned int NAST_KEY_F4 = 0xac;
+const unsigned int NAST_KEY_F5 = 0xad;
+const unsigned int NAST_KEY_F6 = 0xae;
+const unsigned int NAST_KEY_F7 = 0xaf;
+const unsigned int NAST_KEY_F8 = 0xb0;
+const unsigned int NAST_KEY_F9 = 0xb1;
+const unsigned int NAST_KEY_F10 = 0xb2;
+const unsigned int NAST_KEY_F11 = 0xb3;
+const unsigned int NAST_KEY_F12 = 0xb4;
+const unsigned int NAST_KEY_F13 = 0xb5;
+const unsigned int NAST_KEY_F14 = 0xb6;
+const unsigned int NAST_KEY_F15 = 0xb7;
+const unsigned int NAST_KEY_F16 = 0xb8;
+const unsigned int NAST_KEY_F17 = 0xb9;
+const unsigned int NAST_KEY_F18 = 0xba;
+const unsigned int NAST_KEY_F19 = 0xbb;
+const unsigned int NAST_KEY_F20 = 0xbc;
+const unsigned int NAST_KEY_F21 = 0xbd;
+const unsigned int NAST_KEY_F22 = 0xbe;
+const unsigned int NAST_KEY_F23 = 0xbf;
+const unsigned int NAST_KEY_F24 = 0xc0;
+const unsigned int NAST_KEY_F25 = 0xc1;
+const unsigned int NAST_KEY_F26 = 0xc2;
+const unsigned int NAST_KEY_F27 = 0xc3;
+const unsigned int NAST_KEY_F28 = 0xc4;
+const unsigned int NAST_KEY_F29 = 0xc5;
+const unsigned int NAST_KEY_F30 = 0xc6;
+const unsigned int NAST_KEY_F31 = 0xc7;
+const unsigned int NAST_KEY_F32 = 0xc8;
+const unsigned int NAST_KEY_F33 = 0xc9;
+const unsigned int NAST_KEY_F34 = 0xca;
+const unsigned int NAST_KEY_F35 = 0xcb;
+const unsigned int NAST_KEY_F36 = 0xcc;
+const unsigned int NAST_KEY_F37 = 0xcd;
+const unsigned int NAST_KEY_F38 = 0xce;
+const unsigned int NAST_KEY_F39 = 0xcf;
+const unsigned int NAST_KEY_F40 = 0xd0;
+const unsigned int NAST_KEY_F41 = 0xd1;
+const unsigned int NAST_KEY_F42 = 0xd2;
+const unsigned int NAST_KEY_F43 = 0xd3;
+const unsigned int NAST_KEY_F44 = 0xd4;
+const unsigned int NAST_KEY_F45 = 0xd5;
+const unsigned int NAST_KEY_F46 = 0xd6;
+const unsigned int NAST_KEY_F47 = 0xd7;
+const unsigned int NAST_KEY_F48 = 0xd8;
+const unsigned int NAST_KEY_F49 = 0xd9;
+const unsigned int NAST_KEY_F50 = 0xda;
+const unsigned int NAST_KEY_F51 = 0xdb;
+const unsigned int NAST_KEY_F52 = 0xdc;
+const unsigned int NAST_KEY_F53 = 0xdd;
+const unsigned int NAST_KEY_F54 = 0xde;
+const unsigned int NAST_KEY_F55 = 0xdf;
+const unsigned int NAST_KEY_F56 = 0xe0;
+const unsigned int NAST_KEY_F57 = 0xe1;
+const unsigned int NAST_KEY_F58 = 0xe2;
+const unsigned int NAST_KEY_F59 = 0xe3;
+const unsigned int NAST_KEY_F60 = 0xe4;
+const unsigned int NAST_KEY_F61 = 0xe5;
+const unsigned int NAST_KEY_F62 = 0xe6;
+const unsigned int NAST_KEY_F63 = 0xe7;
+
+
+// The goal is to masquerade as xterm.  Everything seems to work with xterm.
+// That's funny, because it used to be that xterm worked with everything, but
+// it did that so well that now it's the other way around.
 //
 // Also see
 //   man 5 terminfo
@@ -333,17 +372,17 @@ key_map_t *keymap[] = {
     (key_map_t[]){{ALTIFY | CTRL_, K("\x0e")}, {0, K("n")}}, // 0x6e n
     (key_map_t[]){{ALTIFY | CTRL_, K("\x0f")}, {0, K("o")}}, // 0x6f o
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x10")}, {0, K("P")}}, // 0x70 p
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x11")}, {0, K("Q")}}, // 0x71 q
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x12")}, {0, K("R")}}, // 0x72 r
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x13")}, {0, K("S")}}, // 0x73 s
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x14")}, {0, K("T")}}, // 0x74 t
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x15")}, {0, K("U")}}, // 0x75 u
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x16")}, {0, K("V")}}, // 0x76 v
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x17")}, {0, K("W")}}, // 0x77 w
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x18")}, {0, K("X")}}, // 0x78 x
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x19")}, {0, K("Y")}}, // 0x79 y
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1a")}, {0, K("Z")}}, // 0x7a z
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x10")}, {0, K("p")}}, // 0x70 p
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x11")}, {0, K("q")}}, // 0x71 q
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x12")}, {0, K("r")}}, // 0x72 r
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x13")}, {0, K("s")}}, // 0x73 s
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x14")}, {0, K("t")}}, // 0x74 t
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x15")}, {0, K("u")}}, // 0x75 u
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x16")}, {0, K("v")}}, // 0x76 v
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x17")}, {0, K("w")}}, // 0x77 w
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x18")}, {0, K("x")}}, // 0x78 x
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x19")}, {0, K("y")}}, // 0x79 y
+    (key_map_t[]){{ALTIFY | CTRL_, K("\x1a")}, {0, K("z")}}, // 0x7a z
     (key_map_t[]){{ALTIFY | CTRL_, K("\x1b")}, {0, K("{")}}, // 0x7b {
     (key_map_t[]){{ALTIFY | CTRL_, K("\x1c")}, {0, K("|")}}, // 0x7c |
     (key_map_t[]){{ALTIFY | CTRL_, K("\x1d")}, {0, K("}")}}, // 0x7d }
@@ -361,7 +400,7 @@ key_map_t *keymap[] = {
     (key_map_t[]){{0, MODS("\x1b[6;%d~", K("\x1b[6~"))}}, // NAST_KEY_PGDN
 
     (key_map_t[]){{ALTIFY | CTRL_, K("\x7f")}, {0, K("\b")}}, // NAST_KEY_BKSP
-    (key_map_t[]){{0, K("\r")}}, // NAST_KEY_ENTER
+    (key_map_t[]){{NOALT, K("\r")}, {0, K("")}}, // NAST_KEY_ENTER
     (key_map_t[]){{SHIFT, K("\x1b[Z")}, {ALT, K("\xc2\x89")}, {0, K("\t")}}, // NAST_KEY_TAB
     (key_map_t[]){{0, K("\x1b")}}, // NAST_KEY_ESC
 
@@ -369,6 +408,43 @@ key_map_t *keymap[] = {
     (key_map_t[]){{0, MODS("\x1b[1;%dB", CURS("\x1bOB", "\x1b[B"))}}, // NAST_KEY_DN
     (key_map_t[]){{0, MODS("\x1b[1;%dC", CURS("\x1bOC", "\x1b[C"))}}, // NAST_KEY_RIGHT
     (key_map_t[]){{0, MODS("\x1b[1;%dD", CURS("\x1bOD", "\x1b[D"))}}, // NAST_KEY_LEFT
+
+    // keypad inputs:
+
+    /* kp0-kp9 only appear with numlock on, and they have no mods behavior.
+       However, shift+kp[0-9] will emit the unnumlocked versions of those keys,
+       which do have MODS behaviors.  But those are not a part of this set. */
+    (key_map_t[]){{0, KPADX(K("X"), K("0"))}}, // NAST_KEY_KP0
+    (key_map_t[]){{0, KPADX(K("X"), K("1"))}}, // NAST_KEY_KP1
+    (key_map_t[]){{0, KPADX(K("X"), K("2"))}}, // NAST_KEY_KP2
+    (key_map_t[]){{0, KPADX(K("X"), K("3"))}}, // NAST_KEY_KP3
+    (key_map_t[]){{0, KPADX(K("X"), K("4"))}}, // NAST_KEY_KP4
+    (key_map_t[]){{0, KPADX(K("X"), K("5"))}}, // NAST_KEY_KP5
+    (key_map_t[]){{0, KPADX(K("X"), K("6"))}}, // NAST_KEY_KP6
+    (key_map_t[]){{0, KPADX(K("X"), K("7"))}}, // NAST_KEY_KP7
+    (key_map_t[]){{0, KPADX(K("X"), K("8"))}}, // NAST_KEY_KP8
+    (key_map_t[]){{0, KPADX(K("X"), K("9"))}}, // NAST_KEY_KP9
+
+    (key_map_t[]){{0, K("*")}}, // NAST_KEY_KPASTERISK
+    (key_map_t[]){{SHIFT, K("")}, {0, K("-")}}, // NAST_KEY_KPMINUS
+    (key_map_t[]){{SHIFT, K("")}, {0, K("+")}}, // NAST_KEY_KPPLUS
+    (key_map_t[]){{0, K(".")}}, // NAST_KEY_KPCOMMA
+    (key_map_t[]){{0, K("/")}}, // NAST_KEY_KPSLASH
+    (key_map_t[]){{0, K("\r")}}, // NAST_KEY_KPENTER
+
+    // keypad numbers without numlock
+    (key_map_t[]){{0, MODS("\x1b[2;%d~", KPAD("\x1bOp", "\x1b[2~"))}}, // NAST_KEY_KP0u
+    (key_map_t[]){{0, MODS("\x1b[1;%dF", KPAD("\x1bOq", "\x1b[F"))}}, // NAST_KEY_KP1u
+    (key_map_t[]){{0, MODS("\x1b[1;%dB", KPAD("\x1bOr", "\x1b[B"))}}, // NAST_KEY_KP2u
+    (key_map_t[]){{0, MODS("\x1b[6;%d~", KPAD("\x1bOs", "\x1b[6~"))}}, // NAST_KEY_KP3u
+    (key_map_t[]){{0, MODS("\x1b[1;%dD", KPAD("\x1bOt", "\x1b[D"))}}, // NAST_KEY_KP4u
+    (key_map_t[]){{0, MODS("\x1b[1;%dE", KPAD("\x1bOu", "\x1b[E"))}}, // NAST_KEY_KP5u
+    (key_map_t[]){{0, MODS("\x1b[1;%dC", KPAD("\x1bOv", "\x1b[C"))}}, // NAST_KEY_KP6u
+    (key_map_t[]){{0, MODS("\x1b[1;%dH", KPAD("\x1bOw", "\x1b[H"))}}, // NAST_KEY_KP7u
+    (key_map_t[]){{0, MODS("\x1b[1;%dA", KPAD("\x1bOx", "\x1b[A"))}}, // NAST_KEY_KP8u
+    (key_map_t[]){{0, MODS("\x1b[5;%d~", KPAD("\x1bOy", "\x1b[5~"))}}, // NAST_KEY_KP9u
+
+    (key_map_t[]){{0, K(".")}}, // NAST_KEY_KPCOMMAu
 
     (key_map_t[]){{0, MODS("\x1b[1;%dP", K("\x1bOP"))}}, // NAST_KEY_F1
     (key_map_t[]){{0, MODS("\x1b[1;%dQ", K("\x1bOQ"))}}, // NAST_KEY_F2
