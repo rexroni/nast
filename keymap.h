@@ -5,27 +5,20 @@ typedef struct {
 
 typedef enum {
     KEY_ACTION_SIMPLE,
-    KEY_ACTION_FUNC,
-    KEY_ACTION_APPCURSOR,
-    KEY_ACTION_APPKEYPAD,
     KEY_ACTION_MODS,
+    KEY_ACTION_FUNC,
 } key_action_type_e;
-
-struct key_action_t;
-typedef struct key_action_t key_action_t;
 
 typedef union {
     simple_key_t simple;
+    char *mods;
     void (*func)(void *globals, GdkEventKey *event_key);
-    key_action_t *appcursor[2];
-    key_action_t *appkeypad[2];
-    key_action_t *mods[2];
 } key_action_u;
 
-struct key_action_t {
+typedef struct {
     key_action_type_e type;
     key_action_u val;
-};
+} key_action_t;
 
 typedef struct {
     unsigned int mask;
@@ -43,41 +36,22 @@ typedef struct {
     } \
 }
 
-// "function"
-#define F(fn) &(key_action_t){ \
-    .type=KEY_ACTION_FUNC, \
-    .func=fn \
-}
-
-// appcursor
-#define CURS(on, off) &(key_action_t){ \
-    .type=KEY_ACTION_APPCURSOR, \
-    .val={ \
-        .appcursor={K(on), K(off)} \
-    } \
-}
-
-// appkeypad
-#define KPAD(on, off) &(key_action_t){ \
-    .type=KEY_ACTION_APPKEYPAD, \
-    .val={ \
-        .appkeypad={K(on), K(off)} \
-    } \
-}
-#define KPADX(on, off) &(key_action_t){ \
-    .type=KEY_ACTION_APPKEYPAD, \
-    .val={ \
-        .appkeypad={on, off} \
-    } \
-}
-
+// "modifiers"
 // xterm's 1 + (8=meta, 4=ctrl, 2=shift, 1=alt) scheme
 // (note this does not work with ALTIFY at all)
 // (see man 5 user_caps)
-#define MODS(on, off) &(key_action_t){ \
+#define M(pattern) &(key_action_t){ \
     .type=KEY_ACTION_MODS, \
     .val={ \
-        .mods={K(on), off} \
+        .mods=pattern \
+    } \
+}
+
+// "function"
+#define F(fn) &(key_action_t){ \
+    .type=KEY_ACTION_FUNC, \
+    .val={ \
+        .func=fn \
     } \
 }
 
@@ -114,8 +88,44 @@ void shift_insert(void *globals, GdkEventKey *event_key);
 #define NOMETA 64
 #define META 192
 
+// 256 = match appcursor
+// 512 = which appcursor matches
+#define MATCH_CURS 256
+#define CURS_MASK 512
+#define NOCURS 256
+#define CURS 768
+
+// 1024 = match appkeypad
+// 2048 = which appkeypad matches
+#define MATCH_KPAD 1024
+#define KPAD_MASK 2048
+#define NOKPAD 1024
+#define KPAD 3072
+
+// 4096 = match modifyotherkeys.lvl=1
+// 8192 = which modifyotherkeys.lvl=1 matches
+#define MATCH_MOK1 4096
+#define MOK1_MASK 8192
+#define NOMOK1 4096
+#define MOK1 12288
+
+// 16384 = match modifyotherkeys.lvl=2
+// 32768 = which modifyotherkeys.lvl=2 matches
+#define MATCH_MOK2 16384
+#define MOK2_MASK 32768
+#define NOMOK2 16384
+#define MOK2 49152
+
+// "not mods", aka not ctrl, alt, shift, or meta
+#define NM (NOCTRL|NOSHIFT|NOALT|NOMETA)
+
+#define MOD_SELECTOR ( \
+    MATCH_CTRL | MATCH_SHIFT | MATCH_ALT | MATCH_META \
+    | MATCH_CURS | MATCH_KPAD | MATCH_MOK1 | MATCH_MOK2 \
+)
+
 // ALTIFY, not a mask but modifies how the list should behave
-#define ALTIFY 256
+#define ALTIFY 2147483648
 
 const unsigned int NAST_KEY_HOME = 0x80;
 const unsigned int NAST_KEY_END = 0x81;
@@ -247,274 +257,271 @@ const unsigned int NAST_KEY_F63 = 0xe7;
 // equivalent of the metaSendsEscape feature turned on permanently.
 // Note that metaSendsEscape does _not_ alter the behavior of the special
 // keys, like kHOM.
-//
-// Also: does gdk's im_context intercept keys typed with alt held down?
-// Experimentally, the answer is no.
+
+#define X(...) (key_map_t[]){__VA_ARGS__}
 
 key_map_t *keymap[] = {
     // TODO: 0x00 through 0x1f I am unable to test
-    (key_map_t[]){{0, K("\x00")}}, // 0x00
-    (key_map_t[]){{0, K("\x01")}}, // 0x01
-    (key_map_t[]){{0, K("\x02")}}, // 0x02
-    (key_map_t[]){{0, K("\x03")}}, // 0x03
-    (key_map_t[]){{0, K("\x04")}}, // 0x04
-    (key_map_t[]){{0, K("\x05")}}, // 0x05
-    (key_map_t[]){{0, K("\x06")}}, // 0x06
-    (key_map_t[]){{0, K("\x07")}}, // 0x07
-    (key_map_t[]){{0, K("\x08")}}, // 0x08
-    (key_map_t[]){{0, K("\x09")}}, // 0x09
-    (key_map_t[]){{0, K("\x0a")}}, // 0x0a
-    (key_map_t[]){{0, K("\x0b")}}, // 0x0b
-    (key_map_t[]){{0, K("\x0c")}}, // 0x0c
-    (key_map_t[]){{0, K("\x0d")}}, // 0x0d
-    (key_map_t[]){{0, K("\x0e")}}, // 0x0e
-    (key_map_t[]){{0, K("\x0f")}}, // 0x0f
+    X({0, K("\x00")}), // 0x00
+    X({0, K("\x01")}), // 0x01
+    X({0, K("\x02")}), // 0x02
+    X({0, K("\x03")}), // 0x03
+    X({0, K("\x04")}), // 0x04
+    X({0, K("\x05")}), // 0x05
+    X({0, K("\x06")}), // 0x06
+    X({0, K("\x07")}), // 0x07
+    X({0, K("\x08")}), // 0x08
+    X({0, K("\x09")}), // 0x09
+    X({0, K("\x0a")}), // 0x0a
+    X({0, K("\x0b")}), // 0x0b
+    X({0, K("\x0c")}), // 0x0c
+    X({0, K("\x0d")}), // 0x0d
+    X({0, K("\x0e")}), // 0x0e
+    X({0, K("\x0f")}), // 0x0f
 
-    (key_map_t[]){{0, K("\x10")}}, // 0x10
-    (key_map_t[]){{0, K("\x11")}}, // 0x11
-    (key_map_t[]){{0, K("\x12")}}, // 0x12
-    (key_map_t[]){{0, K("\x13")}}, // 0x13
-    (key_map_t[]){{0, K("\x14")}}, // 0x14
-    (key_map_t[]){{0, K("\x15")}}, // 0x15
-    (key_map_t[]){{0, K("\x16")}}, // 0x16
-    (key_map_t[]){{0, K("\x17")}}, // 0x17
-    (key_map_t[]){{0, K("\x18")}}, // 0x18
-    (key_map_t[]){{0, K("\x19")}}, // 0x19
-    (key_map_t[]){{0, K("\x1a")}}, // 0x1a
-    (key_map_t[]){{0, K("\x1b")}}, // 0x1b
-    (key_map_t[]){{0, K("\x1c")}}, // 0x1c
-    (key_map_t[]){{0, K("\x1d")}}, // 0x1d
-    (key_map_t[]){{0, K("\x1e")}}, // 0x1e
-    (key_map_t[]){{0, K("\x1f")}}, // 0x1f
+    X({0, K("\x10")}), // 0x10
+    X({0, K("\x11")}), // 0x11
+    X({0, K("\x12")}), // 0x12
+    X({0, K("\x13")}), // 0x13
+    X({0, K("\x14")}), // 0x14
+    X({0, K("\x15")}), // 0x15
+    X({0, K("\x16")}), // 0x16
+    X({0, K("\x17")}), // 0x17
+    X({0, K("\x18")}), // 0x18
+    X({0, K("\x19")}), // 0x19
+    X({0, K("\x1a")}), // 0x1a
+    X({0, K("\x1b")}), // 0x1b
+    X({0, K("\x1c")}), // 0x1c
+    X({0, K("\x1d")}), // 0x1d
+    X({0, K("\x1e")}), // 0x1e
+    X({0, K("\x1f")}), // 0x1f
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\0")}, {0, K(" ")}}, // 0x20 space
-    (key_map_t[]){{ALTIFY, K("!")}}, // 0x21 !
-    (key_map_t[]){{ALTIFY, K("\"")}}, // 0x22 "
-    (key_map_t[]){{ALTIFY, K("#")}}, // 0x23 #
-    (key_map_t[]){{ALTIFY, K("$")}}, // 0x24 $
-    (key_map_t[]){{ALTIFY, K("%")}}, // 0x25 %
-    (key_map_t[]){{ALTIFY, K("&")}}, // 0x26 &
-    (key_map_t[]){{ALTIFY, K("'")}}, // 0x27 '
-    (key_map_t[]){{ALTIFY, K("(")}}, // 0x28 (
-    (key_map_t[]){{ALTIFY, K(")")}}, // 0x29 )
-    (key_map_t[]){{ALTIFY, K("*")}}, // 0x2a *
-    (key_map_t[]){{ALTIFY, K("+")}}, // 0x2b +
-    (key_map_t[]){{ALTIFY, K(",")}}, // 0x2c ,
-    (key_map_t[]){{ALTIFY, K("-")}}, // 0x2d -
-    (key_map_t[]){{ALTIFY, K(".")}}, // 0x2e .
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1f")}, {0, K("/")}}, // 0x2f /
+    X({ALTIFY | CTRL_, K("\0")}, {0, K(" ")}), // 0x20 space
+    X({ALTIFY, K("!")}), // 0x21 !
+    X({ALTIFY, K("\"")}), // 0x22 "
+    X({ALTIFY, K("#")}), // 0x23 #
+    X({ALTIFY, K("$")}), // 0x24 $
+    X({ALTIFY, K("%")}), // 0x25 %
+    X({ALTIFY, K("&")}), // 0x26 &
+    X({ALTIFY, K("'")}), // 0x27 '
+    X({ALTIFY, K("(")}), // 0x28 (
+    X({ALTIFY, K(")")}), // 0x29 )
+    X({ALTIFY, K("*")}), // 0x2a *
+    X({ALTIFY, K("+")}), // 0x2b +
+    X({ALTIFY, K(",")}), // 0x2c ,
+    X({ALTIFY, K("-")}), // 0x2d -
+    X({ALTIFY, K(".")}), // 0x2e .
+    X({ALTIFY | CTRL_, K("\x1f")}, {0, K("/")}), // 0x2f /
 
-    (key_map_t[]){{ALTIFY, K("0")}}, // 0x30 0
-    (key_map_t[]){{ALTIFY, K("1")}}, // 0x31 1
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x00")}, {0, K("2")}}, // 0x32 2
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1b")}, {0, K("3")}}, // 0x33 3
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1c")}, {0, K("4")}}, // 0x34 4
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1d")}, {0, K("5")}}, // 0x35 5
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1e")}, {0, K("6")}}, // 0x36 6
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1f")}, {0, K("7")}}, // 0x37 7
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x7f")}, {0, K("8")}}, // 0x38 8
-    (key_map_t[]){{ALTIFY, K("9")}}, // 0x39 9
-    (key_map_t[]){{ALTIFY, K(":")}}, // 0x3a :
-    (key_map_t[]){{ALTIFY, K(";")}}, // 0x3b ;
-    (key_map_t[]){{ALTIFY, K("<")}}, // 0x3c <
-    (key_map_t[]){{ALTIFY, K("=")}}, // 0x3d =
-    (key_map_t[]){{ALTIFY, K(">")}}, // 0x3e >
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x7f")}, {0, K("?")}}, // 0x3f ?
+    X({ALTIFY, K("0")}), // 0x30 0
+    X({ALTIFY, K("1")}), // 0x31 1
+    X({ALTIFY | CTRL_, K("\x00")}, {0, K("2")}), // 0x32 2
+    X({ALTIFY | CTRL_, K("\x1b")}, {0, K("3")}), // 0x33 3
+    X({ALTIFY | CTRL_, K("\x1c")}, {0, K("4")}), // 0x34 4
+    X({ALTIFY | CTRL_, K("\x1d")}, {0, K("5")}), // 0x35 5
+    X({ALTIFY | CTRL_, K("\x1e")}, {0, K("6")}), // 0x36 6
+    X({ALTIFY | CTRL_, K("\x1f")}, {0, K("7")}), // 0x37 7
+    X({ALTIFY | CTRL_, K("\x7f")}, {0, K("8")}), // 0x38 8
+    X({ALTIFY, K("9")}), // 0x39 9
+    X({ALTIFY, K(":")}), // 0x3a :
+    X({ALTIFY, K(";")}), // 0x3b ;
+    X({ALTIFY, K("<")}), // 0x3c <
+    X({ALTIFY, K("=")}), // 0x3d =
+    X({ALTIFY, K(">")}), // 0x3e >
+    X({ALTIFY | CTRL_, K("\x7f")}, {0, K("?")}), // 0x3f ?
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x00")}, {0, K("@")}}, // 0x40 @
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x01")}, {0, K("A")}}, // 0x41 A
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x02")}, {0, K("B")}}, // 0x42 B
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x03")}, {0, K("C")}}, // 0x43 C
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x04")}, {0, K("D")}}, // 0x44 D
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x05")}, {0, K("E")}}, // 0x45 E
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x06")}, {0, K("F")}}, // 0x46 F
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x07")}, {0, K("G")}}, // 0x47 G
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x08")}, {0, K("H")}}, // 0x48 H
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x09")}, {0, K("I")}}, // 0x49 I
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0a")}, {0, K("J")}}, // 0x4a J
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0b")}, {0, K("K")}}, // 0x4b K
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0c")}, {0, K("L")}}, // 0x4c L
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0d")}, {0, K("M")}}, // 0x4d M
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0e")}, {0, K("N")}}, // 0x4e N
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0f")}, {0, K("O")}}, // 0x4f O
+    X({ALTIFY | CTRL_, K("\x00")}, {0, K("@")}), // 0x40 @
+    X({ALTIFY | CTRL_, K("\x01")}, {0, K("A")}), // 0x41 A
+    X({ALTIFY | CTRL_, K("\x02")}, {0, K("B")}), // 0x42 B
+    X({ALTIFY | CTRL_, K("\x03")}, {0, K("C")}), // 0x43 C
+    X({ALTIFY | CTRL_, K("\x04")}, {0, K("D")}), // 0x44 D
+    X({ALTIFY | CTRL_, K("\x05")}, {0, K("E")}), // 0x45 E
+    X({ALTIFY | CTRL_, K("\x06")}, {0, K("F")}), // 0x46 F
+    X({ALTIFY | CTRL_, K("\x07")}, {0, K("G")}), // 0x47 G
+    X({ALTIFY | CTRL_, K("\x08")}, {0, K("H")}), // 0x48 H
+    X({ALTIFY | CTRL_, K("\x09")}, {0, K("I")}), // 0x49 I
+    X({ALTIFY | CTRL_, K("\x0a")}, {0, K("J")}), // 0x4a J
+    X({ALTIFY | CTRL_, K("\x0b")}, {0, K("K")}), // 0x4b K
+    X({ALTIFY | CTRL_, K("\x0c")}, {0, K("L")}), // 0x4c L
+    X({ALTIFY | CTRL_, K("\x0d")}, {0, K("M")}), // 0x4d M
+    X({ALTIFY | CTRL_, K("\x0e")}, {0, K("N")}), // 0x4e N
+    X({ALTIFY | CTRL_, K("\x0f")}, {0, K("O")}), // 0x4f O
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x10")}, {0, K("P")}}, // 0x50 P
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x11")}, {0, K("Q")}}, // 0x51 Q
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x12")}, {0, K("R")}}, // 0x52 R
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x13")}, {0, K("S")}}, // 0x53 S
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x14")}, {0, K("T")}}, // 0x54 T
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x15")}, {0, K("U")}}, // 0x55 U
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x16")}, {0, K("V")}}, // 0x56 V
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x17")}, {0, K("W")}}, // 0x57 W
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x18")}, {0, K("X")}}, // 0x58 X
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x19")}, {0, K("Y")}}, // 0x59 Y
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1a")}, {0, K("Z")}}, // 0x5a Z
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1b")}, {0, K("[")}}, // 0x5b [
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1c")}, {0, K("\\")}}, /* 0x5c \ */
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1d")}, {0, K("]")}}, // 0x5d ]
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1e")}, {0, K("^")}}, // 0x5e ^
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1f")}, {0, K("_")}}, // 0x5f _
+    X({ALTIFY | CTRL_, K("\x10")}, {0, K("P")}), // 0x50 P
+    X({ALTIFY | CTRL_, K("\x11")}, {0, K("Q")}), // 0x51 Q
+    X({ALTIFY | CTRL_, K("\x12")}, {0, K("R")}), // 0x52 R
+    X({ALTIFY | CTRL_, K("\x13")}, {0, K("S")}), // 0x53 S
+    X({ALTIFY | CTRL_, K("\x14")}, {0, K("T")}), // 0x54 T
+    X({ALTIFY | CTRL_, K("\x15")}, {0, K("U")}), // 0x55 U
+    X({ALTIFY | CTRL_, K("\x16")}, {0, K("V")}), // 0x56 V
+    X({ALTIFY | CTRL_, K("\x17")}, {0, K("W")}), // 0x57 W
+    X({ALTIFY | CTRL_, K("\x18")}, {0, K("X")}), // 0x58 X
+    X({ALTIFY | CTRL_, K("\x19")}, {0, K("Y")}), // 0x59 Y
+    X({ALTIFY | CTRL_, K("\x1a")}, {0, K("Z")}), // 0x5a Z
+    X({ALTIFY | CTRL_, K("\x1b")}, {0, K("[")}), // 0x5b [
+    X({ALTIFY | CTRL_, K("\x1c")}, {0, K("\\")}), /* 0x5c \ */
+    X({ALTIFY | CTRL_, K("\x1d")}, {0, K("]")}), // 0x5d ]
+    X({ALTIFY | CTRL_, K("\x1e")}, {0, K("^")}), // 0x5e ^
+    X({ALTIFY | CTRL_, K("\x1f")}, {0, K("_")}), // 0x5f _
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x00")}, {0, K("`")}}, // 0x60 `
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x01")}, {0, K("a")}}, // 0x61 a
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x02")}, {0, K("b")}}, // 0x62 b
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x03")}, {0, K("c")}}, // 0x63 c
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x04")}, {0, K("d")}}, // 0x64 d
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x05")}, {0, K("e")}}, // 0x65 e
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x06")}, {0, K("f")}}, // 0x66 f
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x07")}, {0, K("g")}}, // 0x67 g
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x08")}, {0, K("h")}}, // 0x68 h
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x09")}, {0, K("i")}}, // 0x69 i
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0a")}, {0, K("j")}}, // 0x6a j
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0b")}, {0, K("k")}}, // 0x6b k
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0c")}, {0, K("l")}}, // 0x6c l
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0d")}, {0, K("m")}}, // 0x6d m
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0e")}, {0, K("n")}}, // 0x6e n
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x0f")}, {0, K("o")}}, // 0x6f o
+    X({ALTIFY | CTRL_, K("\x00")}, {0, K("`")}), // 0x60 `
+    X({ALTIFY | CTRL_, K("\x01")}, {0, K("a")}), // 0x61 a
+    X({ALTIFY | CTRL_, K("\x02")}, {0, K("b")}), // 0x62 b
+    X({ALTIFY | CTRL_, K("\x03")}, {0, K("c")}), // 0x63 c
+    X({ALTIFY | CTRL_, K("\x04")}, {0, K("d")}), // 0x64 d
+    X({ALTIFY | CTRL_, K("\x05")}, {0, K("e")}), // 0x65 e
+    X({ALTIFY | CTRL_, K("\x06")}, {0, K("f")}), // 0x66 f
+    X({ALTIFY | CTRL_, K("\x07")}, {0, K("g")}), // 0x67 g
+    X({ALTIFY | CTRL_, K("\x08")}, {0, K("h")}), // 0x68 h
+    X({ALTIFY | CTRL_, K("\x09")}, {0, K("i")}), // 0x69 i
+    X({ALTIFY | CTRL_, K("\x0a")}, {0, K("j")}), // 0x6a j
+    X({ALTIFY | CTRL_, K("\x0b")}, {0, K("k")}), // 0x6b k
+    X({ALTIFY | CTRL_, K("\x0c")}, {0, K("l")}), // 0x6c l
+    X({ALTIFY | CTRL_, K("\x0d")}, {0, K("m")}), // 0x6d m
+    X({ALTIFY | CTRL_, K("\x0e")}, {0, K("n")}), // 0x6e n
+    X({ALTIFY | CTRL_, K("\x0f")}, {0, K("o")}), // 0x6f o
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x10")}, {0, K("p")}}, // 0x70 p
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x11")}, {0, K("q")}}, // 0x71 q
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x12")}, {0, K("r")}}, // 0x72 r
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x13")}, {0, K("s")}}, // 0x73 s
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x14")}, {0, K("t")}}, // 0x74 t
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x15")}, {0, K("u")}}, // 0x75 u
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x16")}, {0, K("v")}}, // 0x76 v
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x17")}, {0, K("w")}}, // 0x77 w
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x18")}, {0, K("x")}}, // 0x78 x
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x19")}, {0, K("y")}}, // 0x79 y
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1a")}, {0, K("z")}}, // 0x7a z
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1b")}, {0, K("{")}}, // 0x7b {
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1c")}, {0, K("|")}}, // 0x7c |
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1d")}, {0, K("}")}}, // 0x7d }
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1e")}, {0, K("~")}}, // 0x7e ~
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x1f")}, {0, K("\x7f")}}, // 0x7f del  // TODO: could not produce this
+    X({ALTIFY | CTRL_, K("\x10")}, {0, K("p")}), // 0x70 p
+    X({ALTIFY | CTRL_, K("\x11")}, {0, K("q")}), // 0x71 q
+    X({ALTIFY | CTRL_, K("\x12")}, {0, K("r")}), // 0x72 r
+    X({ALTIFY | CTRL_, K("\x13")}, {0, K("s")}), // 0x73 s
+    X({ALTIFY | CTRL_, K("\x14")}, {0, K("t")}), // 0x74 t
+    X({ALTIFY | CTRL_, K("\x15")}, {0, K("u")}), // 0x75 u
+    X({ALTIFY | CTRL_, K("\x16")}, {0, K("v")}), // 0x76 v
+    X({ALTIFY | CTRL_, K("\x17")}, {0, K("w")}), // 0x77 w
+    X({ALTIFY | CTRL_, K("\x18")}, {0, K("x")}), // 0x78 x
+    X({ALTIFY | CTRL_, K("\x19")}, {0, K("y")}), // 0x79 y
+    X({ALTIFY | CTRL_, K("\x1a")}, {0, K("z")}), // 0x7a z
+    X({ALTIFY | CTRL_, K("\x1b")}, {0, K("{")}), // 0x7b {
+    X({ALTIFY | CTRL_, K("\x1c")}, {0, K("|")}), // 0x7c |
+    X({ALTIFY | CTRL_, K("\x1d")}, {0, K("}")}), // 0x7d }
+    X({ALTIFY | CTRL_, K("\x1e")}, {0, K("~")}), // 0x7e ~
+    X({ALTIFY | CTRL_, K("\x1f")}, {0, K("\x7f")}), // 0x7f del  // TODO: could not produce this
 
     // Non-ascii inputs:
 
-    (key_map_t[]){{0, MODS("\x1b[1;%dH", CURS("\x1bOH", "\x1b[H"))}}, // NAST_KEY_HOME
-    (key_map_t[]){{0, MODS("\x1b[1;%dF", CURS("\x1bOF", "\x1b[F"))}}, // NAST_KEY_END
-    (key_map_t[]){{0, MODS("\x1b[2;%d~", K("\x1b[2~"))}}, // NAST_KEY_INSERT
-    (key_map_t[]){{0, MODS("\x1b[3;%d~", K("\x1b[3~"))}}, // NAST_KEY_DELETE
+    X({NM|NOCURS, K("\x1b[H")}, {NM, K("\x1bOH")}, {0, M("\x1b[1;%dH")}), // NAST_KEY_HOME
+    X({NM|NOCURS, K("\x1b[F")}, {NM, K("\x1bOF")}, {0, M("\x1b[1;%dF")}), // NAST_KEY_END
+    X({NM, K("\x1b[2~")}, {0, M("\x1b[2;%d~")}), // NAST_KEY_INSERT
+    X({NM, K("\x1b[3~")}, {0, M("\x1b[3;%d~")}), // NAST_KEY_DELETE
 
-    (key_map_t[]){{0, MODS("\x1b[5;%d~", K("\x1b[5~"))}}, // NAST_KEY_PGUP
-    (key_map_t[]){{0, MODS("\x1b[6;%d~", K("\x1b[6~"))}}, // NAST_KEY_PGDN
+    X({SHIFT, F(shift_pgup)}, {NM, K("\x1b[5~")}, {0, M("\x1b[5;%d~")}), // NAST_KEY_PGUP
+    X({SHIFT, F(shift_pgdn)}, {NM, K("\x1b[6~")}, {0, M("\x1b[6;%d~")}), // NAST_KEY_PGDN
 
-    (key_map_t[]){{ALTIFY | CTRL_, K("\x7f")}, {0, K("\b")}}, // NAST_KEY_BKSP
-    (key_map_t[]){{NOALT, K("\r")}, {0, K("")}}, // NAST_KEY_ENTER
-    (key_map_t[]){{SHIFT, K("\x1b[Z")}, {ALT, K("\xc2\x89")}, {0, K("\t")}}, // NAST_KEY_TAB
-    (key_map_t[]){{0, K("\x1b")}}, // NAST_KEY_ESC
+    X({ALTIFY | CTRL_, K("\x7f")}, {0, K("\b")}), // NAST_KEY_BKSP
+    X({NOALT, K("\r")}, {0, K("")}), // NAST_KEY_ENTER
+    X({SHIFT, K("\x1b[Z")}, {ALT, K("\xc2\x89")}, {0, K("\t")}), // NAST_KEY_TAB
+    X({0, K("\x1b")}), // NAST_KEY_ESC
 
-    (key_map_t[]){{0, MODS("\x1b[1;%dA", CURS("\x1bOA", "\x1b[A"))}}, // NAST_KEY_UP
-    (key_map_t[]){{0, MODS("\x1b[1;%dB", CURS("\x1bOB", "\x1b[B"))}}, // NAST_KEY_DN
-    (key_map_t[]){{0, MODS("\x1b[1;%dC", CURS("\x1bOC", "\x1b[C"))}}, // NAST_KEY_RIGHT
-    (key_map_t[]){{0, MODS("\x1b[1;%dD", CURS("\x1bOD", "\x1b[D"))}}, // NAST_KEY_LEFT
+    X({NM|NOCURS, K("\x1b[A")}, {NM, K("\x1bOA")}, {0, M("\x1b[1;%dA")}), // NAST_KEY_UP
+    X({NM|NOCURS, K("\x1b[B")}, {NM, K("\x1bOB")}, {0, M("\x1b[1;%dB")}), // NAST_KEY_DN
+    X({NM|NOCURS, K("\x1b[C")}, {NM, K("\x1bOC")}, {0, M("\x1b[1;%dC")}), // NAST_KEY_RIGHT
+    X({NM|NOCURS, K("\x1b[D")}, {NM, K("\x1bOD")}, {0, M("\x1b[1;%dD")}), // NAST_KEY_LEFT
 
     // keypad inputs:
 
-    /* kp0-kp9 only appear with numlock on, and they have no mods behavior.
-       However, shift+kp[0-9] will emit the unnumlocked versions of those keys,
-       which do have MODS behaviors.  But those are not a part of this set. */
-    (key_map_t[]){{0, KPADX(K("X"), K("0"))}}, // NAST_KEY_KP0
-    (key_map_t[]){{0, KPADX(K("X"), K("1"))}}, // NAST_KEY_KP1
-    (key_map_t[]){{0, KPADX(K("X"), K("2"))}}, // NAST_KEY_KP2
-    (key_map_t[]){{0, KPADX(K("X"), K("3"))}}, // NAST_KEY_KP3
-    (key_map_t[]){{0, KPADX(K("X"), K("4"))}}, // NAST_KEY_KP4
-    (key_map_t[]){{0, KPADX(K("X"), K("5"))}}, // NAST_KEY_KP5
-    (key_map_t[]){{0, KPADX(K("X"), K("6"))}}, // NAST_KEY_KP6
-    (key_map_t[]){{0, KPADX(K("X"), K("7"))}}, // NAST_KEY_KP7
-    (key_map_t[]){{0, KPADX(K("X"), K("8"))}}, // NAST_KEY_KP8
-    (key_map_t[]){{0, KPADX(K("X"), K("9"))}}, // NAST_KEY_KP9
+    // kp0-kp9 only appear with numlock on, and only when shift is not pressed
+    X({KPAD|NM, K("\x1bOp")}, {KPAD, M("\x1bO%dp")}, {0, K("0")}), // NAST_KEY_KP0
+    X({KPAD|NM, K("\x1bOq")}, {KPAD, M("\x1bO%dq")}, {0, K("1")}), // NAST_KEY_KP1
+    X({KPAD|NM, K("\x1bOr")}, {KPAD, M("\x1bO%dr")}, {0, K("2")}), // NAST_KEY_KP2
+    X({KPAD|NM, K("\x1bOs")}, {KPAD, M("\x1bO%ds")}, {0, K("3")}), // NAST_KEY_KP3
+    X({KPAD|NM, K("\x1bOt")}, {KPAD, M("\x1bO%dt")}, {0, K("4")}), // NAST_KEY_KP4
+    X({KPAD|NM, K("\x1bOu")}, {KPAD, M("\x1bO%du")}, {0, K("5")}), // NAST_KEY_KP5
+    X({KPAD|NM, K("\x1bOv")}, {KPAD, M("\x1bO%dv")}, {0, K("6")}), // NAST_KEY_KP6
+    X({KPAD|NM, K("\x1bOw")}, {KPAD, M("\x1bO%dw")}, {0, K("7")}), // NAST_KEY_KP7
+    X({KPAD|NM, K("\x1bOx")}, {KPAD, M("\x1bO%dx")}, {0, K("8")}), // NAST_KEY_KP8
+    X({KPAD|NM, K("\x1bOy")}, {KPAD, M("\x1bO%dy")}, {0, K("9")}), // NAST_KEY_KP9
 
-    (key_map_t[]){{0, K("*")}}, // NAST_KEY_KPASTERISK
-    (key_map_t[]){{SHIFT, K("")}, {0, K("-")}}, // NAST_KEY_KPMINUS
-    (key_map_t[]){{SHIFT, K("")}, {0, K("+")}}, // NAST_KEY_KPPLUS
-    (key_map_t[]){{0, K(".")}}, // NAST_KEY_KPCOMMA
-    (key_map_t[]){{0, K("/")}}, // NAST_KEY_KPSLASH
-    (key_map_t[]){{0, K("\r")}}, // NAST_KEY_KPENTER
+    X({KPAD|NM, K("\x1bOj")},                 {KPAD, M("\x1bO%dj")}, {0, K("*")}), // NAST_KEY_KPASTERISK
+    X({KPAD|NM, K("\x1bOm")}, {SHIFT, K("")}, {KPAD, M("\x1bO%dm")}, {0, K("-")}), // NAST_KEY_KPMINUS
+    X({KPAD|NM, K("\x1bOk")}, {SHIFT, K("")}, {KPAD, M("\x1bO%dk")}, {0, K("+")}), // NAST_KEY_KPPLUS
+    X({KPAD|NM, K("\x1bOn")},                 {KPAD, M("\x1bO%dn")}, {0, K(".")}), // NAST_KEY_KPCOMMA
+    X({KPAD|NM, K("\x1bOo")},                 {KPAD, M("\x1bO%do")}, {0, K("/")}), // NAST_KEY_KPSLASH
+    X({KPAD|NM, K("\x1bOM")},                 {KPAD, M("\x1bO%dM")}, {0, K("\r")}), // NAST_KEY_KPENTER
 
     // keypad numbers without numlock
-    (key_map_t[]){{0, MODS("\x1b[2;%d~", KPAD("\x1bOp", "\x1b[2~"))}}, // NAST_KEY_KP0u
-    (key_map_t[]){{0, MODS("\x1b[1;%dF", KPAD("\x1bOq", "\x1b[F"))}}, // NAST_KEY_KP1u
-    (key_map_t[]){{0, MODS("\x1b[1;%dB", KPAD("\x1bOr", "\x1b[B"))}}, // NAST_KEY_KP2u
-    (key_map_t[]){{0, MODS("\x1b[6;%d~", KPAD("\x1bOs", "\x1b[6~"))}}, // NAST_KEY_KP3u
-    (key_map_t[]){{0, MODS("\x1b[1;%dD", KPAD("\x1bOt", "\x1b[D"))}}, // NAST_KEY_KP4u
-    (key_map_t[]){{0, MODS("\x1b[1;%dE", KPAD("\x1bOu", "\x1b[E"))}}, // NAST_KEY_KP5u
-    (key_map_t[]){{0, MODS("\x1b[1;%dC", KPAD("\x1bOv", "\x1b[C"))}}, // NAST_KEY_KP6u
-    (key_map_t[]){{0, MODS("\x1b[1;%dH", KPAD("\x1bOw", "\x1b[H"))}}, // NAST_KEY_KP7u
-    (key_map_t[]){{0, MODS("\x1b[1;%dA", KPAD("\x1bOx", "\x1b[A"))}}, // NAST_KEY_KP8u
-    (key_map_t[]){{0, MODS("\x1b[5;%d~", KPAD("\x1bOy", "\x1b[5~"))}}, // NAST_KEY_KP9u
+    X({NM, K("\x1b[2~")}, {0, M("\x1b[2;%d~")}), // NAST_KEY_KP0u
+    X({NM, K("\x1b[F")},  {0, M("\x1b[1;%dF")}), // NAST_KEY_KP1u
+    X({NM, K("\x1b[B")},  {0, M("\x1b[1;%dB")}), // NAST_KEY_KP2u
+    X({NM, K("\x1b[6~")}, {0, M("\x1b[6;%d~")}), // NAST_KEY_KP3u
+    X({NM, K("\x1b[D")},  {0, M("\x1b[1;%dD")}), // NAST_KEY_KP4u
+    X({NM, K("\x1b[E")},  {0, M("\x1b[1;%dE")}), // NAST_KEY_KP5u
+    X({NM, K("\x1b[C")},  {0, M("\x1b[1;%dC")}), // NAST_KEY_KP6u
+    X({NM, K("\x1b[H")},  {0, M("\x1b[1;%dH")}), // NAST_KEY_KP7u
+    X({NM, K("\x1b[A")},  {0, M("\x1b[1;%dA")}), // NAST_KEY_KP8u
+    X({NM, K("\x1b[5~")}, {0, M("\x1b[5;%d~")}), // NAST_KEY_KP9u
 
-    (key_map_t[]){{0, K(".")}}, // NAST_KEY_KPCOMMAu
+    X({0, K(".")}), // NAST_KEY_KPCOMMAu
 
-    (key_map_t[]){{0, MODS("\x1b[1;%dP", K("\x1bOP"))}}, // NAST_KEY_F1
-    (key_map_t[]){{0, MODS("\x1b[1;%dQ", K("\x1bOQ"))}}, // NAST_KEY_F2
-    (key_map_t[]){{0, MODS("\x1b[1;%dR", K("\x1bOR"))}}, // NAST_KEY_F3
-    (key_map_t[]){{0, MODS("\x1b[1;%dS", K("\x1bOS"))}}, // NAST_KEY_F4
+    X({NM, K("\x1bOP")}, {0, M("\x1b[1;%dP")}), // NAST_KEY_F1
+    X({NM, K("\x1bOQ")}, {0, M("\x1b[1;%dQ")}), // NAST_KEY_F2
+    X({NM, K("\x1bOR")}, {0, M("\x1b[1;%dR")}), // NAST_KEY_F3
+    X({NM, K("\x1bOS")}, {0, M("\x1b[1;%dS")}), // NAST_KEY_F4
 
-    (key_map_t[]){{0, MODS("\x1b[15;%d~", K("\x1b[15~"))}}, // NAST_KEY_F5
+    X({NM, K("\x1b[15~")}, {0, M("\x1b[15;%d~")}), // NAST_KEY_F5
 
-    (key_map_t[]){{0, MODS("\x1b[17;%d~", K("\x1b[17~"))}}, // NAST_KEY_F6
-    (key_map_t[]){{0, MODS("\x1b[18;%d~", K("\x1b[18~"))}}, // NAST_KEY_F7
-    (key_map_t[]){{0, MODS("\x1b[19;%d~", K("\x1b[19~"))}}, // NAST_KEY_F8
-    (key_map_t[]){{0, MODS("\x1b[20;%d~", K("\x1b[20~"))}}, // NAST_KEY_F9
-    (key_map_t[]){{0, MODS("\x1b[21;%d~", K("\x1b[21~"))}}, // NAST_KEY_F10
+    X({NM, K("\x1b[17~")}, {0, M("\x1b[17;%d~")}), // NAST_KEY_F6
+    X({NM, K("\x1b[18~")}, {0, M("\x1b[18;%d~")}), // NAST_KEY_F7
+    X({NM, K("\x1b[19~")}, {0, M("\x1b[19;%d~")}), // NAST_KEY_F8
+    X({NM, K("\x1b[20~")}, {0, M("\x1b[20;%d~")}), // NAST_KEY_F9
+    X({NM, K("\x1b[21~")}, {0, M("\x1b[21;%d~")}), // NAST_KEY_F10
 
-    (key_map_t[]){{0, MODS("\x1b[23;%d~", K("\x1b[23~"))}}, // NAST_KEY_F11
-    (key_map_t[]){{0, MODS("\x1b[24;%d~", K("\x1b[24~"))}}, // NAST_KEY_F12
+    X({NM, K("\x1b[23~")}, {0, M("\x1b[23;%d~")}), // NAST_KEY_F11
+    X({NM, K("\x1b[24~")}, {0, M("\x1b[24;%d~")}), // NAST_KEY_F12
 
     // TODO: F12-F63 are from xterm's infocmp, can't seem to test them
     // note that e.g. F13 conflicts with a modifer version of F1
-    (key_map_t[]){{0, K("\x1b[1;2P")}}, // NAST_KEY_F13
-    (key_map_t[]){{0, K("\x1b[1;2Q")}}, // NAST_KEY_F14
-    (key_map_t[]){{0, K("\x1b[1;2R")}}, // NAST_KEY_F15
-    (key_map_t[]){{0, K("\x1b[1;2S")}}, // NAST_KEY_F16
-    (key_map_t[]){{0, K("\x1b[15;2~")}}, // NAST_KEY_F17
-    (key_map_t[]){{0, K("\x1b[17;2~")}}, // NAST_KEY_F18
-    (key_map_t[]){{0, K("\x1b[18;2~")}}, // NAST_KEY_F19
-    (key_map_t[]){{0, K("\x1b[19;2~")}}, // NAST_KEY_F20
-    (key_map_t[]){{0, K("\x1b[20;2~")}}, // NAST_KEY_F21
-    (key_map_t[]){{0, K("\x1b[21;2~")}}, // NAST_KEY_F22
-    (key_map_t[]){{0, K("\x1b[23;2~")}}, // NAST_KEY_F23
-    (key_map_t[]){{0, K("\x1b[24;2~")}}, // NAST_KEY_F24
-    (key_map_t[]){{0, K("\x1b[1;5P")}}, // NAST_KEY_F25
-    (key_map_t[]){{0, K("\x1b[1;5Q")}}, // NAST_KEY_F26
-    (key_map_t[]){{0, K("\x1b[1;5R")}}, // NAST_KEY_F27
-    (key_map_t[]){{0, K("\x1b[1;5S")}}, // NAST_KEY_F28
-    (key_map_t[]){{0, K("\x1b[15;5~")}}, // NAST_KEY_F29
-    (key_map_t[]){{0, K("\x1b[17;5~")}}, // NAST_KEY_F30
-    (key_map_t[]){{0, K("\x1b[18;5~")}}, // NAST_KEY_F31
-    (key_map_t[]){{0, K("\x1b[19;5~")}}, // NAST_KEY_F32
-    (key_map_t[]){{0, K("\x1b[20;5~")}}, // NAST_KEY_F33
-    (key_map_t[]){{0, K("\x1b[21;5~")}}, // NAST_KEY_F34
-    (key_map_t[]){{0, K("\x1b[23;5~")}}, // NAST_KEY_F35
-    (key_map_t[]){{0, K("\x1b[24;5~")}}, // NAST_KEY_F36
-    (key_map_t[]){{0, K("\x1b[1;6P")}}, // NAST_KEY_F37
-    (key_map_t[]){{0, K("\x1b[1;6Q")}}, // NAST_KEY_F38
-    (key_map_t[]){{0, K("\x1b[1;6R")}}, // NAST_KEY_F39
-    (key_map_t[]){{0, K("\x1b[1;6S")}}, // NAST_KEY_F40
-    (key_map_t[]){{0, K("\x1b[15;6~")}}, // NAST_KEY_F41
-    (key_map_t[]){{0, K("\x1b[17;6~")}}, // NAST_KEY_F42
-    (key_map_t[]){{0, K("\x1b[18;6~")}}, // NAST_KEY_F43
-    (key_map_t[]){{0, K("\x1b[19;6~")}}, // NAST_KEY_F44
-    (key_map_t[]){{0, K("\x1b[20;6~")}}, // NAST_KEY_F45
-    (key_map_t[]){{0, K("\x1b[21;6~")}}, // NAST_KEY_F46
-    (key_map_t[]){{0, K("\x1b[23;6~")}}, // NAST_KEY_F47
-    (key_map_t[]){{0, K("\x1b[24;6~")}}, // NAST_KEY_F48
-    (key_map_t[]){{0, K("\x1b[1;3P")}}, // NAST_KEY_F49
-    (key_map_t[]){{0, K("\x1b[1;3Q")}}, // NAST_KEY_F50
-    (key_map_t[]){{0, K("\x1b[1;3R")}}, // NAST_KEY_F51
-    (key_map_t[]){{0, K("\x1b[1;3S")}}, // NAST_KEY_F52
-    (key_map_t[]){{0, K("\x1b[15;3~")}}, // NAST_KEY_F53
-    (key_map_t[]){{0, K("\x1b[17;3~")}}, // NAST_KEY_F54
-    (key_map_t[]){{0, K("\x1b[18;3~")}}, // NAST_KEY_F55
-    (key_map_t[]){{0, K("\x1b[19;3~")}}, // NAST_KEY_F56
-    (key_map_t[]){{0, K("\x1b[20;3~")}}, // NAST_KEY_F57
-    (key_map_t[]){{0, K("\x1b[21;3~")}}, // NAST_KEY_F58
-    (key_map_t[]){{0, K("\x1b[23;3~")}}, // NAST_KEY_F59
-    (key_map_t[]){{0, K("\x1b[24;3~")}}, // NAST_KEY_F60
-    (key_map_t[]){{0, K("\x1b[1;4P")}}, // NAST_KEY_F61
-    (key_map_t[]){{0, K("\x1b[1;4Q")}}, // NAST_KEY_F62
-    (key_map_t[]){{0, K("\x1b[1;4R")}}, // NAST_KEY_F63
+    X({0, K("\x1b[1;2P")}), // NAST_KEY_F13
+    X({0, K("\x1b[1;2Q")}), // NAST_KEY_F14
+    X({0, K("\x1b[1;2R")}), // NAST_KEY_F15
+    X({0, K("\x1b[1;2S")}), // NAST_KEY_F16
+    X({0, K("\x1b[15;2~")}), // NAST_KEY_F17
+    X({0, K("\x1b[17;2~")}), // NAST_KEY_F18
+    X({0, K("\x1b[18;2~")}), // NAST_KEY_F19
+    X({0, K("\x1b[19;2~")}), // NAST_KEY_F20
+    X({0, K("\x1b[20;2~")}), // NAST_KEY_F21
+    X({0, K("\x1b[21;2~")}), // NAST_KEY_F22
+    X({0, K("\x1b[23;2~")}), // NAST_KEY_F23
+    X({0, K("\x1b[24;2~")}), // NAST_KEY_F24
+    X({0, K("\x1b[1;5P")}), // NAST_KEY_F25
+    X({0, K("\x1b[1;5Q")}), // NAST_KEY_F26
+    X({0, K("\x1b[1;5R")}), // NAST_KEY_F27
+    X({0, K("\x1b[1;5S")}), // NAST_KEY_F28
+    X({0, K("\x1b[15;5~")}), // NAST_KEY_F29
+    X({0, K("\x1b[17;5~")}), // NAST_KEY_F30
+    X({0, K("\x1b[18;5~")}), // NAST_KEY_F31
+    X({0, K("\x1b[19;5~")}), // NAST_KEY_F32
+    X({0, K("\x1b[20;5~")}), // NAST_KEY_F33
+    X({0, K("\x1b[21;5~")}), // NAST_KEY_F34
+    X({0, K("\x1b[23;5~")}), // NAST_KEY_F35
+    X({0, K("\x1b[24;5~")}), // NAST_KEY_F36
+    X({0, K("\x1b[1;6P")}), // NAST_KEY_F37
+    X({0, K("\x1b[1;6Q")}), // NAST_KEY_F38
+    X({0, K("\x1b[1;6R")}), // NAST_KEY_F39
+    X({0, K("\x1b[1;6S")}), // NAST_KEY_F40
+    X({0, K("\x1b[15;6~")}), // NAST_KEY_F41
+    X({0, K("\x1b[17;6~")}), // NAST_KEY_F42
+    X({0, K("\x1b[18;6~")}), // NAST_KEY_F43
+    X({0, K("\x1b[19;6~")}), // NAST_KEY_F44
+    X({0, K("\x1b[20;6~")}), // NAST_KEY_F45
+    X({0, K("\x1b[21;6~")}), // NAST_KEY_F46
+    X({0, K("\x1b[23;6~")}), // NAST_KEY_F47
+    X({0, K("\x1b[24;6~")}), // NAST_KEY_F48
+    X({0, K("\x1b[1;3P")}), // NAST_KEY_F49
+    X({0, K("\x1b[1;3Q")}), // NAST_KEY_F50
+    X({0, K("\x1b[1;3R")}), // NAST_KEY_F51
+    X({0, K("\x1b[1;3S")}), // NAST_KEY_F52
+    X({0, K("\x1b[15;3~")}), // NAST_KEY_F53
+    X({0, K("\x1b[17;3~")}), // NAST_KEY_F54
+    X({0, K("\x1b[18;3~")}), // NAST_KEY_F55
+    X({0, K("\x1b[19;3~")}), // NAST_KEY_F56
+    X({0, K("\x1b[20;3~")}), // NAST_KEY_F57
+    X({0, K("\x1b[21;3~")}), // NAST_KEY_F58
+    X({0, K("\x1b[23;3~")}), // NAST_KEY_F59
+    X({0, K("\x1b[24;3~")}), // NAST_KEY_F60
+    X({0, K("\x1b[1;4P")}), // NAST_KEY_F61
+    X({0, K("\x1b[1;4Q")}), // NAST_KEY_F62
+    X({0, K("\x1b[1;4R")}), // NAST_KEY_F63
 };
 
 #undef K

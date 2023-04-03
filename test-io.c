@@ -107,13 +107,6 @@ int keyev(int ret, int kbd, int key, int pressed){
        it isn't clear why or if there's somehwere else that would be more
        efficient to pause */
     usleep(100);
-    // for(int i = 0; i < 2; i++){
-    //     struct input_event ev = events[i];
-    //     printf(
-    //         "input_ev {.type=%d, .code=%d, .value=%d}\n",
-    //         (int)ev.type, (int)ev.code, (int)ev.value
-    //     );
-    // }
     ssize_t n = write(kbd, events, sizeof(events));
     if(n < sizeof(events)){
         perror("write(kbd)");
@@ -317,6 +310,7 @@ int await_child(pid_t expect_pid){
 #define SHIFT(x) MOD(KEY_LEFTSHIFT, x)
 #define CTL(x) MOD(KEY_LEFTCTRL, x)
 #define ALT(x) MOD(KEY_LEFTALT, x)
+#define META(x) MOD(KEY_LEFTMETA, x)
 
 #define EXPECT(x) ret = read_expected(ret, conn, x, strlen(x))
 #define EXPECT_N(x, n) ret = read_expected(ret, conn, x, n)
@@ -545,22 +539,47 @@ int run_test(int kbd, int conn){
 
     // appkeypad mode
     testlog(ret, "appkeypad mode");
-    ret = numlock_on(ret, kbd, &numlock);
     ret = send_msg(ret, conn, APPKEYPAD_ON, strlen(APPKEYPAD_ON));
     ret = numlock_off(ret, kbd, &numlock);
-    // XXX: test all modifier combinations here, because this shit is weird
-    printf("---------\n");
     KPNUM; EXPECT("\x1b[H\x1b[A\x1b[5~"
                   "\x1b[D\x1b[E\x1b[C"
                   "\x1b[F\x1b[B\x1b[6~"
                         "\x1b[2~");
-    printf("---------\n");
+    SHIFT(KPNUM); EXPECT("\x1b[1;2H\x1b[1;2A\x1b[5;2~"
+                         "\x1b[1;2D\x1b[1;2E\x1b[1;2C"
+                         "\x1b[1;2F\x1b[1;2B\x1b[6;2~"
+                                  "\x1b[2;2~");
+    CTL(KPNUM); EXPECT("\x1b[1;5H\x1b[1;5A\x1b[5;5~"
+                       "\x1b[1;5D\x1b[1;5E\x1b[1;5C"
+                       "\x1b[1;5F\x1b[1;5B\x1b[6;5~"
+                                "\x1b[2;5~");
+    ALT(KPNUM); EXPECT("\x1b[1;3H\x1b[1;3A\x1b[5;3~"
+                       "\x1b[1;3D\x1b[1;3E\x1b[1;3C"
+                       "\x1b[1;3F\x1b[1;3B\x1b[6;3~"
+                                "\x1b[2;3~");
     KPPUNC; EXPECT("\x1bOj\x1bOm\x1bOk\x1bOn\x1bOo\x1bOM");
+    SHIFT(KPPUNC); EXPECT("\x1bO2j\x1bO2n\x1bO2o\x1bO2M");
+    CTL(SHIFT(KPPUNC)); EXPECT("\x1bO6j\x1bO6n\x1bO6o\x1bO6M");
+    ALT(SHIFT(KPPUNC)); EXPECT("\x1bO4j\x1bO4n\x1bO4o\x1bO4M");
+    CTL(KPPUNC); EXPECT("\x1bO5j\x1bO5m\x1bO5k\x1bO5n\x1bO5o\x1bO5M");
+    ALT(KPPUNC); EXPECT("\x1bO3j\x1bO3m\x1bO3k\x1bO3n\x1bO3o\x1bO3M");
     ret = numlock_on(ret, kbd, &numlock);
     KPNUM; EXPECT("\x1bOw\x1bOx\x1bOy"
                   "\x1bOt\x1bOu\x1bOv"
                   "\x1bOq\x1bOr\x1bOs"
                         "\x1bOp");
+    SHIFT(KPNUM); EXPECT("\x1b[1;2H\x1b[1;2A\x1b[5;2~"
+                         "\x1b[1;2D\x1b[1;2E\x1b[1;2C"
+                         "\x1b[1;2F\x1b[1;2B\x1b[6;2~"
+                                  "\x1b[2;2~");
+    CTL(KPNUM); EXPECT("\x1bO5w\x1bO5x\x1bO5y"
+                       "\x1bO5t\x1bO5u\x1bO5v"
+                       "\x1bO5q\x1bO5r\x1bO5s"
+                              "\x1bO5p");
+    ALT(KPNUM); EXPECT("\x1bO3w\x1bO3x\x1bO3y"
+                       "\x1bO3t\x1bO3u\x1bO3v"
+                       "\x1bO3q\x1bO3r\x1bO3s"
+                              "\x1bO3p");
     KPPUNC; EXPECT("\x1bOj\x1bOm\x1bOk\x1bOn\x1bOo\x1bOM");
     ret = send_msg(ret, conn, APPKEYPAD_OFF, strlen(APPKEYPAD_OFF));
 

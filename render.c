@@ -25,22 +25,9 @@ typedef struct {
     bool appkeypad;
     bool want_focus;
 
-    struct {
-        // 0 = off, 1 = alt/meta, 2 = ctrl/shift/alt/meta
-        int lvl;
-        /* to support im_ctx, we decide what modify_other would send, then we
-           give the im_ctx a chance to consume it, and if it emits what we
-           expected then we substitute the buf in for the character.  If an
-           input method existed which consumed multiple regular characters and
-           emitted chunks of them in sequence, this would break down, but that
-           seems unlikely to happen soon, since input methods are designed for
-           east asian languages and the like. */
-        char expect;
-        char buf[32];
-        size_t len;
-    } modify_other;
+    // 0 = off, 1 = alt/meta, 2 = ctrl/shift/alt/meta
+    int modify_other;
 
-    GtkIMContext *im_ctx;
     int ttyfd;
     struct writable writable;
     gboolean write_pending;
@@ -143,12 +130,7 @@ void set_clipboard(THooks *thooks, char *buf, size_t len){
 
 void set_modify_other(THooks *thooks, int lvl){
     globals_t *g = (globals_t*)thooks;
-    g->modify_other.lvl = lvl;
-    if(lvl == 0){
-        // reset any state
-        g->modify_other.len = 0;
-        g->modify_other.expect = '\0';
-    }
+    g->modify_other = lvl;
 }
 
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
@@ -278,173 +260,10 @@ void shift_insert(void *globals, GdkEventKey *event_key){
 }
 
 // developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-key-press-event
-static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
-        gpointer user_data){
+static gboolean on_key_event(
+    GtkWidget *widget, GdkEventKey *event_key, gpointer user_data
+){
     globals_t *g = user_data;
-
-    // some things will wrongly be captured by the im_context, like keypad
-    if(false && event_key->type == GDK_KEY_PRESS){
-        bool x = g->appkeypad;
-        switch(event_key->keyval){
-            // https://vt100.net/docs/vt100-ug/chapter3.html#S3.3 table 3-8
-            case GDK_KEY_KP_0:
-                ttywrite(g, x ? "\x1bOp" : "0", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_1:
-                ttywrite(g, x ? "\x1bOq" : "1", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_2:
-                ttywrite(g, x ? "\x1bOr" : "2", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_3:
-                ttywrite(g, x ? "\x1bOs" : "3", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_4:
-                ttywrite(g, x ? "\x1bOt" : "4", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_5:
-                ttywrite(g, x ? "\x1bOu" : "5", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_6:
-                ttywrite(g, x ? "\x1bOv" : "6", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_7:
-                ttywrite(g, x ? "\x1bOw" : "7", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_8:
-                ttywrite(g, x ? "\x1bOx" : "8", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_9:
-                ttywrite(g, x ? "\x1bOy" : "9", x ? 3 : 1, 0);
-                return TRUE;
-
-            // keypad keys: 789 456 123 0 (without numpad)
-            case GDK_KEY_KP_Home:
-                ttywrite(g, x ? "X" : "\x1b[H", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_Up:
-                ttywrite(g, x ? "X" : "\x1b[A", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_Page_Up:
-                ttywrite(g, x ? "X" : "\x1b[5~", x ? 1 : 4, 0);
-                return TRUE;
-            case GDK_KEY_KP_Left:
-                ttywrite(g, x ? "X" : "\x1b[D", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_Begin:
-                ttywrite(g, x ? "X" : "\x1b[E", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_Right:
-                ttywrite(g, x ? "X" : "\x1b[C", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_End:
-                ttywrite(g, x ? "X" : "\x1b[F", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_Down:
-                ttywrite(g, x ? "X" : "\x1b[B", x ? 1 : 3, 0);
-                return TRUE;
-            case GDK_KEY_KP_Page_Down:
-                ttywrite(g, x ? "X" : "\x1b[6~", x ? 1 : 4, 0);
-                return TRUE;
-            case GDK_KEY_KP_Insert:
-                ttywrite(g, x ? "X" : "\x1b[2~", x ? 1 : 4, 0);
-                return TRUE;
-
-            // GDK_KEY_KP_Separator seems to never appear.
-            // (KEY_KPCOMMA is coming through GTK as GDK_KEY_KP_Decimal...?)
-            // Probably this is fine since modern numpads have no comma.
-            case GDK_KEY_KP_Separator:
-                ttywrite(g, x ? "\x1bOl" : ",", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_Subtract:
-                ttywrite(g, x ? "\x1bOm" : "-", x ? 3 : 1, 0);
-                return TRUE;
-            case GDK_KEY_KP_Decimal:
-                ttywrite(g, x ? "\x1bOn" : ".", x ? 3 : 1, 0);
-                return TRUE;
-
-            // return key is handled later for non-appkeypad mode
-            case GDK_KEY_KP_Enter:
-                if(x){
-                    ttywrite(g, "\x1bOM", 3, 0);
-                    return TRUE;
-                }
-                break;
-
-            // apparently none of [*+/] are special
-            // case GDK_KEY_KP_Multiply:
-            // case GDK_KEY_KP_Add:
-            // case GDK_KEY_KP_Divide:
-        }
-    }
-
-    bool ctrl = event_key->state & GDK_CONTROL_MASK;
-    bool shift = event_key->state & GDK_SHIFT_MASK;
-    bool alt = event_key->state & GDK_MOD1_MASK;
-    bool meta = event_key->state & GDK_META_MASK;
-
-    bool modify_other = false;
-    if(g->modify_other.lvl > 0) modify_other |= alt | meta;
-    if(g->modify_other.lvl == 2) modify_other |= shift | ctrl;
-
-    // if(
-    //     modify_other
-    //     && !event_key->is_modifier
-    //     && event_key->type == GDK_KEY_PRESS
-    //     && event_key->keyval >= 32
-    //     && event_key->keyval < 128
-    //     /* mysteriously, xterm omits the modifyOther behavior when pressing
-    //        only shift for ascii characters greater than 32 (' ') and less than
-    //        64 ('@') so we imitate that here */
-    //     && !(
-    //             event_key->keyval > 32
-    //             && event_key->keyval < 64
-    //             && event_key->state == GDK_SHIFT_MASK
-    //     )
-    // ){
-    //     /* If modifyOtherKeys is on, we figure out what we would emit for
-    //        modify_other, then remember that in case the im_ctx decides to not
-    //        do anything special with the character.  If it doesn't do anything
-    //        special, we interecept the output in im_commit() and substitute the
-    //        buffer we store here.  We do this whole dance because we don't want
-    //        modify_other to disable all input methods or applications like vim
-    //        would basically never work with im_ctx. */
-    //     // XXX: these cases were only tested with modifyOtherKeys=2
-    //     // XXX: what about modifyOtherKeys=1?
-    //     /* interesting test cases for modifyOtherKeys=2:
-    //         space, shift+space, ctrl+shift+space
-    //         1, !, ctrl+!
-    //         /, ?, ctrl+?
-    //         2, @, ctrl+@
-    //         a, A, ctrl+A
-    //         h, H, ctrl+H, ctrl+h  (xterm specifically mentions this)
-    //         i, I, ctrl+I, ctrl+i  (xterm specifically mentions this)
-    //         m, M, ctrl+M, ctrl+m  (xterm specifically mentions this)
-    //         tab, shift+tab, ctrl+shift+tab
-    //         esc, shift+esc, ctrl+shift+esc
-    //         backspace, shift+backspace, ctrl+shift+backspace */
-
-    //     // TODO: does xterm work with input methods?
-    //     // XXX: need to special case the backspace, tab, and escape keys
-    //     /* XXX: WTF, xterm docs clearly specifically say that shift-tab should
-    //        not emit a CSI Z but it still does */
-    //     int mod_idx = 1 + shift + 2*alt + 4*ctrl + 8*meta;
-    //     int len = snprintf(
-    //         g->modify_other.buf,
-    //         sizeof(g->modify_other.buf),
-    //         "\x1b[27;%d;%d~",
-    //         mod_idx,
-    //         event_key->keyval
-    //     );
-    //     if(len < 1) die("snprintf failed");
-    //     if(len >= sizeof(g->modify_other.buf)) die("modify_other overflow");
-    //     g->modify_other.len = (size_t)len;
-    //     g->modify_other.expect = event_key->keyval;
-    // }
-
-    // if(gtk_im_context_filter_keypress(g->im_ctx, event_key)){
-    //     return TRUE;
-    // }
 
     // ignore modifier keys themselves, let GTK track their state
     if(event_key->is_modifier) return TRUE;
@@ -551,88 +370,73 @@ static gboolean on_key_event(GtkWidget *widget, GdkEventKey *event_key,
             case GDK_KEY_F35:       key_idx = NAST_KEY_F35; break;
         }
     }
-    if(key_idx != (size_t)-1){
-        key_map_t *map = keymap[key_idx];
 
-        /* the ALTIFY flag on the zeroth element dictates if we allow alt to
-           add 128 to the output */
-        bool altify = map[0].mask & ALTIFY;
-
-        size_t i = 0;
-        while(true){
-            bool ok = true;
-            unsigned int mask = map[i].mask;
-            ok &= !(mask & MATCH_CTRL) || (ctrl == !!(mask & CTRL_MASK));
-            ok &= !(mask & MATCH_SHIFT) || (shift == !!(mask & SHIFT_MASK));
-            ok &= !(mask & MATCH_ALT) || (alt == !!(mask & ALT_MASK));
-            ok &= !(mask & MATCH_META) || (meta == !!(mask & META_MASK));
-            if(ok) break;
-            i++;
+    if(key_idx == (size_t)-1){
+        if(event_key->type == GDK_KEY_PRESS){
+            fprintf(stderr, "unhandled keypress! (0x%x)\n", event_key->keyval);
         }
+        return TRUE;
+    }
 
-        key_action_t *act = map[i].action;
-        char buf[128];
-        size_t len;
-        simple_key_t simple;
-        // descend through any pointers to a terminal action
-        while(true){
-            switch(act->type){
-                case KEY_ACTION_APPCURSOR:
-                    act = act->val.appcursor[!g->appcursor];
-                    // restart the loop with the new key action
-                    continue;
+    unsigned int state = event_key->state;
+    int modify_other = g->modify_other;
+    int mods = (CTRL_MASK * !!(state & GDK_CONTROL_MASK))
+             | (SHIFT_MASK * !!(state & GDK_SHIFT_MASK))
+             | (ALT_MASK * !!(state & GDK_MOD1_MASK))
+             | (META_MASK * !!(state & GDK_META_MASK))
+             | (CURS_MASK * g->appcursor)
+             | (KPAD_MASK * g->appkeypad)
+             | (MOK1_MASK * (modify_other == 1))
+             | (MOK2_MASK * (modify_other == 2));
 
-                case KEY_ACTION_APPKEYPAD:
-                    act = act->val.appcursor[!g->appkeypad];
-                    // restart the loop with the new key action
-                    continue;
+    key_map_t *map = keymap[key_idx];
 
-                case KEY_ACTION_FUNC:
-                    // execute the action and end the entire function
-                    act->val.func(g, event_key);
-                    return TRUE;
+    // pick the first key from the keymap where all relevant mods are matched
+    size_t i = 0;
+    while(true){
+        unsigned int mask = map[i].mask;
+        // make a mask for the values of the modifiers we care about
+        unsigned int important = (mask & MOD_SELECTOR) << 1;
+        if((mods & important) == (mask & important)) break;
+        i++;
+    }
 
-                case KEY_ACTION_MODS:
-                    /* MODS is a terminal action only when there is a modifier
-                       key pressed */
-                    if(!shift && !ctrl && !alt && !meta){
-                        act = act->val.mods[1];
-                        continue;
-                    }
-                    // the "on" action for mods is always a simple
-                    simple = act->val.mods[0]->val.simple;
-                    int mod_idx = 1 + shift + 2*alt + 4*ctrl + 8*meta;
-                    int ilen = sprintf(buf, simple.text, mod_idx);
-                    if(ilen < 1){
-                        fprintf(stderr, "failed to sprintf(%.*s, %d)\n",
-                                (int)simple.len, simple.text, mod_idx);
-                    }else{
-                        ttywrite(g, buf, (size_t)ilen, 0);
-                    }
-                    return TRUE;
-
-                case KEY_ACTION_SIMPLE:
-                    simple = act->val.simple;
-                    if(altify && alt){
-                        /* when altify is set, we take the value of char we
-                           would emit, add 128 to it, then utf-8 encode it and
-                           emit the result */
-                        Rune r = simple.text[0];
-                        len = utf8encode(r + 128, buf);
-                        ttywrite(g, buf, len, 0);
-                    }else{
-                        ttywrite(g, simple.text, simple.len, 0);
-                    }
-                    return TRUE;
+    char buf[128];
+    key_action_t *act = map[i].action;
+    switch(act->type){
+        case KEY_ACTION_SIMPLE: {
+            char *text = act->val.simple.text;
+            size_t len = act->val.simple.len;
+            /* the ALTIFY flag on the zeroth element dictates if we allow alt
+               to add 128 to the output */
+            if((map[0].mask & ALTIFY) && (ALT_MASK & mods)){
+                Rune r = text[0];
+                len = utf8encode(r + 128, buf);
+                ttywrite(g, buf, len, 0);
+            }else{
+                ttywrite(g, text, len, 0);
             }
-        }
+        } break;
+        case KEY_ACTION_MODS: {
+            char *fmt = act->val.mods;
+            int mod_idx = 1
+                        + 1 * !!(SHIFT_MASK & mods)
+                        + 2 * !!(ALT_MASK & mods)
+                        + 4 * !!(CTRL_MASK & mods)
+                        + 8 * !!(META_MASK & mods);
+            int ilen = sprintf(buf, fmt, mod_idx);
+            if(ilen < 1){
+                fprintf(stderr, "failed to sprintf(%s, %d)\n", fmt, mod_idx);
+            }else{
+                ttywrite(g, buf, (size_t)ilen, 0);
+            }
+        } break;
+        case KEY_ACTION_FUNC:
+            // execute the action and end the entire function
+            act->val.func(g, event_key);
+            break;
     }
-
-    if(event_key->type == GDK_KEY_PRESS){
-        printf("unhandled keypress! (0x%x)\n", event_key->keyval);
-    }
-
-    return FALSE;
+    return TRUE;
 }
 
 // developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-focus-in-event
@@ -661,37 +465,6 @@ static gboolean on_focus_out(
         ttywrite(g, "\x1b[O", 3, 0);
     }
     return FALSE;
-}
-
-static void im_commit(GtkIMContext *im_ctx, gchar *str, gpointer user_data){
-    // printf("commit! (%s)\n", str);
-    globals_t *g = user_data;
-    size_t len_in = strlen(str);
-    if(
-        g->modify_other.lvl
-        && g->modify_other.len
-        && len_in == 1
-        && str[0] == g->modify_other.expect
-    ){
-        ttywrite(g, g->modify_other.buf, g->modify_other.len, 0);
-        // consume the modify_other buffer
-        g->modify_other.expect = '\0';
-        g->modify_other.len = 0;
-        return;
-    }
-    ttywrite(g, str, len_in, 0);
-}
-
-static void im_preedit_start(GtkIMContext *im_ctx, gpointer user_data){
-    // printf("preedit start!\n");
-}
-
-static void im_preedit_end(GtkIMContext *im_ctx, gpointer user_data){
-    // printf("preedit end!\n");
-}
-
-static void im_preedit_changed(GtkIMContext *im_ctx, gpointer user_data){
-    // printf("preedit changed!\n");
 }
 
 static gboolean tty_read(GIOChannel *src, globals_t *g){
@@ -857,15 +630,6 @@ int main(int argc, char *argv[]){
     // GTK input handling: developer.gnome.org/gtk3/stable/chap-input-handling.html
     g_signal_connect(G_OBJECT(g.darea), "draw", G_CALLBACK(on_draw_event), &g);
     g_signal_connect(G_OBJECT(g.window), "destroy", G_CALLBACK(gtk_main_quit), &g);
-
-    // configure the input method
-    g.im_ctx = gtk_im_context_simple_new();
-    if(!g.im_ctx) die("gtk_im_context_simple_new()\n");
-
-    g_signal_connect(G_OBJECT(g.im_ctx), "commit", G_CALLBACK(im_commit), &g);
-    g_signal_connect(G_OBJECT(g.im_ctx), "preedit-end", G_CALLBACK(im_preedit_end), &g);
-    g_signal_connect(G_OBJECT(g.im_ctx), "preedit-start", G_CALLBACK(im_preedit_start), &g);
-    g_signal_connect(G_OBJECT(g.im_ctx), "preedit-changed", G_CALLBACK(im_preedit_changed), &g);
 
     //// get keypresses from the drawing area (does not work)
     // gtk_widget_add_events(GTK_WIDGET(darea), GDK_KEY_PRESS_MASK);
