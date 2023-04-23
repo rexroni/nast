@@ -312,8 +312,7 @@ int await_child(pid_t expect_pid){
 #define ALT(x) MOD(KEY_LEFTALT, x)
 #define META(x) MOD(KEY_LEFTMETA, x)
 
-#define EXPECT(x) ret = read_expected(ret, conn, x, strlen(x))
-#define EXPECT_N(x, n) ret = read_expected(ret, conn, x, n)
+#define EXPECT(x) ret = read_expected(ret, conn, x, sizeof((char[]){x})-1)
 
 // all alphabet keys
 int alpha(int ret, int kbd){
@@ -420,6 +419,13 @@ int numlock_off(int ret, int kbd, int *numlock){
     return 0;
 }
 
+int modify_other_keys(int ret, int conn, int lvl){
+    if(ret) return ret;
+    char buf[32];
+    size_t len = snprintf(buf, sizeof(buf), "\x1b[>4;%dm", lvl);
+    return send_msg(ret, conn, buf, len);
+}
+
 void testlog(int ret, char *msg){
     if(ret) return;
     fprintf(stderr, "- %s\n", msg);
@@ -476,10 +482,10 @@ int run_test(int kbd, int conn){
     CTL(ALPHA); EXPECT("\x01\x02\x03\x04\x05\x06\x07\x08\x09"
                        "\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12"
                        "\x13\x14\x15\x16\x17\x18\x19\x1a");
-    CTL(NUM); EXPECT_N("1\x00\x1b\x1c\x1d\x1e\x1f\x7f""90",10);
-    CTL(PUNC); EXPECT_N("\x00-\x1c;',.\x1f\x1b\x1d", 10);
+    CTL(NUM); EXPECT("1\x00\x1b\x1c\x1d\x1e\x1f\x7f""90");
+    CTL(PUNC); EXPECT("\x00-\x1c;',.\x1f\x1b\x1d");
     CTL(ARROWS); EXPECT("\x1b[1;5A\x1b[1;5B\x1b[1;5C\x1b[1;5D");
-    CTL(SPECIAL); EXPECT_N("\x00\t\x7f\r", 4);
+    CTL(SPECIAL); EXPECT("\x00\t\x7f\r");
     CTL(INSDEL);  EXPECT("\x1b[2;5~\x1b[1;5H\x1b[5;5~"
                          "\x1b[3;5~\x1b[1;5F\x1b[6;5~");
     ret = numlock_off(ret, kbd, &numlock);
@@ -522,6 +528,16 @@ int run_test(int kbd, int conn){
     ret = numlock_on(ret, kbd, &numlock);
     ALT(KPNUM); EXPECT("7894561230");
     ALT(KPPUNC); EXPECT("*-+./\r");
+
+    // even more numbers
+    testlog(ret, "even more numbers");
+    CTL(SHIFT(NUM)); EXPECT("!\x00#$%\x1e&*()");
+    ALT(SHIFT(NUM)); EXPECT("\xc2\xa1\xc3\x80\xc2\xa3\xc2\xa4\xc2\xa5"
+                            "\xc3\x9e\xc2\xa6\xc2\xaa\xc2\xa8\xc2\xa9");
+    ALT(CTL(NUM)); EXPECT("\xc2\xb1\xc2\x80\xc2\x9b\xc2\x9c\xc2\x9d"
+                          "\xc2\x9e\xc2\x9f\xc3\xbf\xc2\xb9\xc2\xb0");
+    ALT(CTL(SHIFT(NUM))); EXPECT("\xc2\xa1\xc2\x80\xc2\xa3\xc2\xa4\xc2\xa5"
+                                 "\xc2\x9e\xc2\xa6\xc2\xaa\xc2\xa8\xc2\xa9");
 
     // appcursor mode
     testlog(ret, "appcursor mode");
@@ -582,6 +598,185 @@ int run_test(int kbd, int conn){
                               "\x1bO3p");
     KPPUNC; EXPECT("\x1bOj\x1bOm\x1bOk\x1bOn\x1bOo\x1bOM");
     ret = send_msg(ret, conn, APPKEYPAD_OFF, strlen(APPKEYPAD_OFF));
+
+    // modifyOtherKeys=2
+    testlog(ret, "modifyOtherKeys=2");
+    ret = modify_other_keys(ret, conn, 2);
+    usleep(100000);
+    CTL(ALPHA); EXPECT(
+        "\x1b[27;5;97~\x1b[27;5;98~\x1b[27;5;99~\x1b[27;5;100~\x1b[27;5;101~"
+        "\x1b[27;5;102~\x1b[27;5;103~\x1b[27;5;104~\x1b[27;5;105~\x1b[27;5;106~"
+        "\x1b[27;5;107~\x1b[27;5;108~\x1b[27;5;109~\x1b[27;5;110~\x1b[27;5;111~"
+        "\x1b[27;5;112~\x1b[27;5;113~\x1b[27;5;114~\x1b[27;5;115~\x1b[27;5;116~"
+        "\x1b[27;5;117~\x1b[27;5;118~\x1b[27;5;119~\x1b[27;5;120~\x1b[27;5;121~"
+        "\x1b[27;5;122~"
+    );
+    SHIFT(ALPHA); EXPECT(
+        "\x1b[27;2;65~\x1b[27;2;66~\x1b[27;2;67~\x1b[27;2;68~\x1b[27;2;69~"
+        "\x1b[27;2;70~\x1b[27;2;71~\x1b[27;2;72~\x1b[27;2;73~\x1b[27;2;74~"
+        "\x1b[27;2;75~\x1b[27;2;76~\x1b[27;2;77~\x1b[27;2;78~\x1b[27;2;79~"
+        "\x1b[27;2;80~\x1b[27;2;81~\x1b[27;2;82~\x1b[27;2;83~\x1b[27;2;84~"
+        "\x1b[27;2;85~\x1b[27;2;86~\x1b[27;2;87~\x1b[27;2;88~\x1b[27;2;89~"
+        "\x1b[27;2;90~"
+    );
+    ALT(ALPHA); EXPECT(
+        "\x1b[27;3;97~\x1b[27;3;98~\x1b[27;3;99~\x1b[27;3;100~\x1b[27;3;101~"
+        "\x1b[27;3;102~\x1b[27;3;103~\x1b[27;3;104~\x1b[27;3;105~\x1b[27;3;106~"
+        "\x1b[27;3;107~\x1b[27;3;108~\x1b[27;3;109~\x1b[27;3;110~\x1b[27;3;111~"
+        "\x1b[27;3;112~\x1b[27;3;113~\x1b[27;3;114~\x1b[27;3;115~\x1b[27;3;116~"
+        "\x1b[27;3;117~\x1b[27;3;118~\x1b[27;3;119~\x1b[27;3;120~\x1b[27;3;121~"
+        "\x1b[27;3;122~"
+    );
+    SHIFT(NUM); EXPECT("!\x1b[27;2;64~#$%\x1b[27;2;94~&*()");
+    CTL(NUM); EXPECT(
+        "\x1b[27;5;49~\x1b[27;5;50~\x1b[27;5;51~\x1b[27;5;52~\x1b[27;5;53~"
+        "\x1b[27;5;54~\x1b[27;5;55~\x1b[27;5;56~\x1b[27;5;57~\x1b[27;5;48~"
+    );
+    ALT(NUM); EXPECT(
+        "\x1b[27;3;49~\x1b[27;3;50~\x1b[27;3;51~\x1b[27;3;52~\x1b[27;3;53~"
+        "\x1b[27;3;54~\x1b[27;3;55~\x1b[27;3;56~\x1b[27;3;57~\x1b[27;3;48~"
+    );
+    CTL(SHIFT(NUM)); EXPECT(
+        "\x1b[27;6;33~\x1b[27;6;64~\x1b[27;6;35~\x1b[27;6;36~\x1b[27;6;37~"
+        "\x1b[27;6;94~\x1b[27;6;38~\x1b[27;6;42~\x1b[27;6;40~\x1b[27;6;41~"
+    );
+    ALT(SHIFT(NUM)); EXPECT(
+        "\x1b[27;4;33~\x1b[27;4;64~\x1b[27;4;35~\x1b[27;4;36~\x1b[27;4;37~"
+        "\x1b[27;4;94~\x1b[27;4;38~\x1b[27;4;42~\x1b[27;4;40~\x1b[27;4;41~"
+    );
+    ALT(CTL(NUM)); EXPECT(
+        "\x1b[27;7;49~\x1b[27;7;50~\x1b[27;7;51~\x1b[27;7;52~\x1b[27;7;53~"
+        "\x1b[27;7;54~\x1b[27;7;55~\x1b[27;7;56~\x1b[27;7;57~\x1b[27;7;48~"
+    );
+    CTL(ALT(SHIFT(NUM))); EXPECT(
+        "\x1b[27;8;33~\x1b[27;8;64~\x1b[27;8;35~\x1b[27;8;36~\x1b[27;8;37~"
+        "\x1b[27;8;94~\x1b[27;8;38~\x1b[27;8;42~\x1b[27;8;40~\x1b[27;8;41~"
+    );
+    CTL(PUNC); EXPECT(
+        "\x1b[27;5;96~\x1b[27;5;45~\x1b[27;5;92~\x1b[27;5;59~\x1b[27;5;39~"
+        "\x1b[27;5;44~\x1b[27;5;46~\x1b[27;5;47~\x1b[27;5;91~\x1b[27;5;93~"
+    );
+    ALT(PUNC); EXPECT(
+        "\x1b[27;3;96~\x1b[27;3;45~\x1b[27;3;92~\x1b[27;3;59~\x1b[27;3;39~"
+        "\x1b[27;3;44~\x1b[27;3;46~\x1b[27;3;47~\x1b[27;3;91~\x1b[27;3;93~"
+    );
+    CTL(ALT(PUNC)); EXPECT(
+        "\x1b[27;7;96~\x1b[27;7;45~\x1b[27;7;92~\x1b[27;7;59~\x1b[27;7;39~"
+        "\x1b[27;7;44~\x1b[27;7;46~\x1b[27;7;47~\x1b[27;7;91~\x1b[27;7;93~"
+    );
+    SHIFT(PUNC); EXPECT("\x1b[27;2;126~\x1b[27;2;95~\x1b[27;2;124~:\""
+                        "<>?\x1b[27;2;123~\x1b[27;2;125~");
+    CTL(SHIFT(PUNC)); EXPECT(
+        "\x1b[27;6;126~\x1b[27;6;95~\x1b[27;6;124~\x1b[27;6;58~\x1b[27;6;34~"
+        "\x1b[27;6;60~\x1b[27;6;62~\x1b[27;6;63~\x1b[27;6;123~\x1b[27;6;125~"
+    );
+    ALT(SHIFT(PUNC)); EXPECT(
+        "\x1b[27;4;126~\x1b[27;4;95~\x1b[27;4;124~\x1b[27;4;58~\x1b[27;4;34~"
+        "\x1b[27;4;60~\x1b[27;4;62~\x1b[27;4;63~\x1b[27;4;123~\x1b[27;4;125~"
+    );
+    CTL(ALT(SHIFT(PUNC))); EXPECT(
+        "\x1b[27;8;126~\x1b[27;8;95~\x1b[27;8;124~\x1b[27;8;58~\x1b[27;8;34~"
+        "\x1b[27;8;60~\x1b[27;8;62~\x1b[27;8;63~\x1b[27;8;123~\x1b[27;8;125~"
+    );
+    SHIFT(ARROWS); EXPECT("\x1b[1;2A\x1b[1;2B\x1b[1;2C\x1b[1;2D");
+    SHIFT(SPECIAL); EXPECT("\x1b[27;2;32~\x1b[Z\x1b[27;2;8~\x1b[27;2;13~");
+    SHIFT(INSDEL2); EXPECT("\x1b[3;2~\x1b[1;2H\x1b[1;2F");
+    ret = numlock_off(ret, kbd, &numlock);
+    SHIFT(KPNUM); EXPECT("\x1b[1;2H\x1b[1;2A\x1b[5;2~"
+                         "\x1b[1;2D\x1b[1;2E\x1b[1;2C"
+                         "\x1b[1;2F\x1b[1;2B\x1b[6;2~"
+                                  "\x1b[2;2~");
+    SHIFT(KPPUNC); EXPECT("*./\r");
+    ret = numlock_on(ret, kbd, &numlock);
+    SHIFT(KPNUM); EXPECT("\x1b[1;2H\x1b[1;2A\x1b[5;2~"
+                         "\x1b[1;2D\x1b[1;2E\x1b[1;2C"
+                         "\x1b[1;2F\x1b[1;2B\x1b[6;2~"
+                                  "\x1b[2;2~");
+    SHIFT(KPPUNC); EXPECT("*./\r");
+    ret = modify_other_keys(ret, conn, 0);
+
+    // modifyOtherKeys=1
+    testlog(ret, "modifyOtherKeys=1");
+    usleep(100000);
+    ret = modify_other_keys(ret, conn, 1);
+    SHIFT(ALPHA); EXPECT("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    SHIFT(ALPHA); EXPECT("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    SHIFT(NUM); EXPECT("!@#$%^&*()");
+    SHIFT(PUNC); EXPECT("~_|:\"<>?{}");
+    SHIFT(ARROWS); EXPECT("\x1b[1;2A\x1b[1;2B\x1b[1;2C\x1b[1;2D");
+    SHIFT(SPECIAL); EXPECT(" \x1b[Z\b\x1b[27;2;13~");
+    SHIFT(INSDEL2); EXPECT("\x1b[3;2~\x1b[1;2H\x1b[1;2F");
+    ret = numlock_off(ret, kbd, &numlock);
+    SHIFT(KPNUM); EXPECT("\x1b[1;2H\x1b[1;2A\x1b[5;2~"
+                         "\x1b[1;2D\x1b[1;2E\x1b[1;2C"
+                         "\x1b[1;2F\x1b[1;2B\x1b[6;2~"
+                                  "\x1b[2;2~");
+    SHIFT(KPPUNC); EXPECT("*./\r");
+    ret = numlock_on(ret, kbd, &numlock);
+    SHIFT(KPNUM); EXPECT("\x1b[1;2H\x1b[1;2A\x1b[5;2~"
+                         "\x1b[1;2D\x1b[1;2E\x1b[1;2C"
+                         "\x1b[1;2F\x1b[1;2B\x1b[6;2~"
+                                  "\x1b[2;2~");
+    SHIFT(KPPUNC); EXPECT("*./\r");
+    CTL(ALPHA); EXPECT("\x01\x02\x03\x04\x05\x06\x07\x08\x09"
+                       "\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12"
+                       "\x13\x14\x15\x16\x17\x18\x19\x1a");
+    CTL(NUM); EXPECT(
+        "\x1b[27;5;49~\x00\x1b\x1c\x1d\x1e\x1f\x7f\x1b[27;5;57~\x1b[27;5;48~"
+    );
+    ALT(SHIFT(NUM)); EXPECT("\xc2\xa1\xc3\x80\xc2\xa3\xc2\xa4\xc2\xa5"
+                            "\xc3\x9e\xc2\xa6\xc2\xaa\xc2\xa8\xc2\xa9");
+    ALT(CTL(NUM)); EXPECT(
+        "\x1b[27;7;49~\x1b[27;7;50~\x1b[27;7;51~\x1b[27;7;52~\x1b[27;7;53~"
+        "\x1b[27;7;54~\x1b[27;7;55~\x1b[27;7;56~\x1b[27;7;57~\x1b[27;7;48~"
+    );
+    SHIFT(CTL(NUM)); EXPECT(
+        "\x1b[27;6;33~\x00\x1b[27;6;35~\x1b[27;6;36~\x1b[27;6;37~\x1e"
+        "\x1b[27;6;38~\x1b[27;6;42~\x1b[27;6;40~\x1b[27;6;41~"
+    );
+    SHIFT(ALT(CTL(NUM))); EXPECT(
+        "\x1b[27;8;33~\xc2\x80\x1b[27;8;35~\x1b[27;8;36~"
+        "\x1b[27;8;37~\xc2\x9e\x1b[27;8;38~\x1b[27;8;42~\x1b[27;8;40~\x1b[27;8;41~"
+    );
+
+    CTL(PUNC); EXPECT(
+        "\x00\x1b[27;5;45~\x1c\x1b[27;5;59~\x1b[27;5;39~\x1b[27;5;44~"
+        "\x1b[27;5;46~\x1f\x1b\x1d"
+    );
+    ALT(PUNC); EXPECT("\xc3\xa0\xc2\xad\xc3\x9c\xc2\xbb\xc2\xa7"
+                      "\xc2\xac\xc2\xae\xc2\xaf\xc3\x9b\xc3\x9d");
+    CTL(ALT(PUNC)); EXPECT(
+        "\xc2\x80\x1b[27;7;45~\xc2\x9c\x1b[27;7;59~\x1b[27;7;39~"
+        "\x1b[27;7;44~\x1b[27;7;46~\x1b[27;7;47~\xc2\x9b\xc2\x9d"
+    );
+    SHIFT(PUNC); EXPECT("~_|:\"<>?{}");
+    CTL(SHIFT(PUNC)); EXPECT(
+        "\x1e\x1f\x1c\x1b[27;6;58~\x1b[27;6;34~"
+        "\x1b[27;6;60~\x1b[27;6;62~\x1b[27;6;63~\x1b\x1d"
+    );
+    ALT(SHIFT(PUNC)); EXPECT("\xc3\xbe\xc3\x9f\xc3\xbc\xc2\xba\xc2\xa2"
+                             "\xc2\xbc\xc2\xbe\xc2\xbf\xc3\xbb\xc3\xbd");
+    CTL(ALT(SHIFT(PUNC))); EXPECT(
+        "\xc2\x9e\xc2\x9f\xc2\x9c\x1b[27;8;58~\x1b[27;8;34~"
+        "\x1b[27;8;60~\x1b[27;8;62~\x1b[27;8;63~\xc2\x9b\xc2\x9d"
+    );
+    CTL(ARROWS); EXPECT("\x1b[1;5A\x1b[1;5B\x1b[1;5C\x1b[1;5D");
+    CTL(SPECIAL); EXPECT("\x00\x1b[27;5;9~\x7f\x1b[27;5;13~");
+    CTL(INSDEL);  EXPECT("\x1b[2;5~\x1b[1;5H\x1b[5;5~"
+                         "\x1b[3;5~\x1b[1;5F\x1b[6;5~");
+    ret = numlock_off(ret, kbd, &numlock);
+    CTL(KPNUM); EXPECT("\x1b[1;5H\x1b[1;5A\x1b[5;5~"
+                       "\x1b[1;5D\x1b[1;5E\x1b[1;5C"
+                       "\x1b[1;5F\x1b[1;5B\x1b[6;5~"
+                                "\x1b[2;5~");
+    CTL(KPPUNC); EXPECT("*-+./\r");
+    ret = numlock_on(ret, kbd, &numlock);
+    CTL(KPNUM); EXPECT("7894561230");
+    CTL(SHIFT((KPNUM))); EXPECT("\x1b[1;6H\x1b[1;6A\x1b[5;6~"
+                                "\x1b[1;6D\x1b[1;6E\x1b[1;6C"
+                                "\x1b[1;6F\x1b[1;6B\x1b[6;6~"
+                                         "\x1b[2;6~");
+    CTL(KPPUNC); EXPECT("*-+./\r");
 
     // match something simple to ensure we matched all input
     KEY(E);KEY(N);KEY(D);KEY(SPACE);

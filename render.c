@@ -386,7 +386,7 @@ static gboolean on_key_event(
              | (META_MASK * !!(state & GDK_META_MASK))
              | (CURS_MASK * g->appcursor)
              | (KPAD_MASK * g->appkeypad)
-             | (MOK1_MASK * (modify_other == 1))
+             | (MOK1_MASK * (modify_other >= 1))  // at lvl 2, lvl 1 is also on
              | (MOK2_MASK * (modify_other == 2));
 
     key_map_t *map = keymap[key_idx];
