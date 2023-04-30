@@ -115,6 +115,24 @@ static void set_mode(THooks *thooks, enum win_mode mode, int val){
     if(mode & MODE_MOUSE) die("MODE_MOUSE mode not handled\n");
 }
 
+static int get_mode(THooks *thooks, enum win_mode mode){
+    globals_t *g = (globals_t*)thooks;
+
+    if(mode & MODE_APPCURSOR){
+        return g->appcursor;
+    }
+
+    if(mode & MODE_APPKEYPAD){
+        return g->appkeypad;
+    }
+
+    if(mode & MODE_FOCUS){
+        return g->want_focus;
+    }
+
+    return 0;
+}
+
 void set_title(THooks *thooks, const char *title){
     (void)thooks;
     (void)title;
@@ -618,6 +636,7 @@ int main(int argc, char *argv[]){
             .bell = bell_hook,
             .sendbreak = sendbreak_hook,
             .set_mode = set_mode,
+            .get_mode = get_mode,
             .set_title = set_title,
             .set_clipboard = set_clipboard,
             .set_modify_other = set_modify_other,

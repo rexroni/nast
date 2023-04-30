@@ -1451,11 +1451,72 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
     }
 }
 
+/* Helps with Request ANSI Mode and Request DEC Private Mode (DECRQM).
+   Response is one of:
+     0: not recognized
+     1: set
+     2: reset
+     3: permanently set
+     4: permanently reset */
+int tgetmode(Term *t, int priv, int arg){
+    if (priv) {
+        switch (arg) {
+        case 1: /* DECCKM -- Cursor key */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_APPCURSOR);
+        case 5: /* DECSCNM -- Reverse video */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_REVERSE);
+        case 6: /* DECOM -- Origin */
+            return 1 + !(t->c.state & CURSOR_ORIGIN);
+        case 7: /* DECAWM -- Auto wrap */
+            return 1 + !(t->mode & MODE_WRAP);
+        case 25: /* DECTCEM -- Text Cursor Enable Mode */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_HIDE);
+        case 9:    /* X10 mouse compatibility mode */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSEX10);
+        case 1000: /* 1000: report button press */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSEBTN);
+        case 1002: /* 1002: report motion on button press */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSEMOTION);
+        case 1004: /* 1004: send focus events to tty */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_FOCUS);
+        case 1006: /* 1006: extended reporting mode */
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSESGR);
+        case 1034:
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_8BIT);
+        case 2004: /* 2004: bracketed paste mode */
+            // see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+            // search for "Ps = 2 0 0 4"
+            return 1 + !(t->mode & MODE_BRCKTPASTE);
+        case 12: /* att610 -- Start blinking cursor (IGNORED) */
+            return 4;
+        default:
+            fprintf(stderr, "unknown private request mode %d\n", arg);
+            return 0;
+        }
+    } else {
+        switch (arg) {
+        case 2:
+            return 1 + !t->hooks->get_mode(t->hooks, MODE_KBDLOCK);
+        case 4:  /* IRM -- Insertion-replacement */
+            return 1 + !(t->mode & MODE_INSERT);
+        case 12: /* SRM -- Send/Receive */
+            // this is intentionally inverted from the others
+            return 1 + (t->mode & MODE_ECHO);
+        case 20: /* LNM -- Linefeed/new line */
+            return 1 + !(t->mode & MODE_CRLF);
+        default:
+            fprintf(stderr, "unknown request mode %d\n", arg);
+            return 0;
+        }
+    }
+}
+
 void
 csihandle(Term *t)
 {
     char buf[40];
     int len;
+    int lvl;
 
     switch (csiescseq.mode) {
     case '@': /* ICH -- Insert <n> blank char */
@@ -1656,7 +1717,6 @@ csihandle(Term *t)
         if(csiescseq.submode) goto unknown;
         if(csiescseq.priv == '>'){
             // XTMODKEYS -- set/reset key modifier options
-            int lvl;
             switch(csiescseq.arg[0]){
                 case 0: // modifyKeyboard
                 case 1: // modifyCursorKeys
@@ -1672,7 +1732,6 @@ csihandle(Term *t)
             }
         }else if(csiescseq.priv == '?'){
             // Query key modifier options (XTQMODKEYS)
-            int lvl;
             switch(csiescseq.arg[0]){
                 case 0: // modifyKeyboard
                 case 1: // modifyCursorKeys
@@ -1797,6 +1856,20 @@ csihandle(Term *t)
         default:
             goto unknown;
         }
+        break;
+    case 'p':
+        if(csiescseq.submode != '$') goto unknown;
+        // DECRQM: request ansi mode / request dec private mode
+        lvl = tgetmode(t, csiescseq.priv, csiescseq.arg[0]);
+        len = snprintf(
+            buf,
+            sizeof(buf),
+            "\x1b[%s%d;%d$y",
+            csiescseq.priv?"?":"",
+            csiescseq.arg[0],
+            lvl
+        );
+        t->hooks->ttywrite(t->hooks, buf, len);
         break;
 
     default:
@@ -2023,6 +2096,7 @@ dcshandle(Term *t, STREscape strescseq)
             die("decqss buffer was too short for string!");
         }
         t->hooks->ttywrite(t->hooks, resp, strlen(resp));
+        return;
     }
 
     fprintf(stderr, "erresc: unknown DCS: ");
