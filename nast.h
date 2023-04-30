@@ -150,6 +150,7 @@ struct THooks {
     void (*set_title)(THooks*, const char *);
     void (*set_clipboard)(THooks*, char *buf, size_t len);
     void (*set_modify_other)(THooks*, int lvl);
+    int (*get_modify_other)(THooks*);
 };
 
 typedef union {

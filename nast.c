@@ -1670,6 +1670,26 @@ csihandle(Term *t)
                 default:
                     goto unknown;
             }
+        }else if(csiescseq.priv == '?'){
+            // Query key modifier options (XTQMODKEYS)
+            int lvl;
+            switch(csiescseq.arg[0]){
+                case 0: // modifyKeyboard
+                case 1: // modifyCursorKeys
+                case 2: // modifyFunctionKeys
+                    goto unknown;
+                case 4: // modifyOtherKeys
+                    lvl = csiescseq.arg[1];
+                    if(lvl < 0 || lvl > 2) goto unknown;
+                    lvl = t->hooks->get_modify_other(t->hooks);
+                    break;
+                default:
+                    goto unknown;
+            }
+            len = snprintf(
+                buf, sizeof(buf), "\x1b[>%d;%dm", csiescseq.arg[0], lvl
+            );
+            t->hooks->ttywrite(t->hooks, buf, len);
         }else if(!csiescseq.priv){
             // SGR -- Terminal attribute (color)
             if(csiescseq.priv || csiescseq.submode) goto unknown;

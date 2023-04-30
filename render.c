@@ -133,6 +133,11 @@ void set_modify_other(THooks *thooks, int lvl){
     g->modify_other = lvl;
 }
 
+int get_modify_other(THooks *thooks){
+    globals_t *g = (globals_t*)thooks;
+    return g->modify_other;
+}
+
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
     if(!g->write_pending){
         g->write_pending = TRUE;
@@ -616,6 +621,7 @@ int main(int argc, char *argv[]){
             .set_title = set_title,
             .set_clipboard = set_clipboard,
             .set_modify_other = set_modify_other,
+            .get_modify_other = get_modify_other,
         },
     };
     G = &g;
