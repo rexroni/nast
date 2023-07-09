@@ -20,6 +20,9 @@ typedef struct {
     Term *term;
     pid_t pid;
 
+    char *font_name;
+    int font_size;
+
     // rendering and io state
     bool appcursor;
     bool appkeypad;
@@ -490,6 +493,33 @@ static gboolean on_focus_out(
     return FALSE;
 }
 
+// https://docs.gtk.org/gtk3/signal.Widget.scroll-event.html
+// https://docs.gtk.org/gdk3/struct.EventScroll.html
+static gboolean on_scroll_event(
+    GtkWidget* widget, GdkEventScroll *event, gpointer user_data
+){
+    if(~event->state & GDK_CONTROL_MASK) return TRUE;
+    int dz;
+    if(event->direction == GDK_SCROLL_UP){
+        dz = +1;
+    }else if(event->direction == GDK_SCROLL_DOWN){
+        dz = -1;
+    }else{
+        return TRUE;
+    }
+    globals_t *g = user_data;
+    int new_size = g->font_size + dz;
+    // don't let font_size drop to zero
+    if(new_size == 0) return FALSE;
+    int ret = tsetfont(g->term, g->font_name, new_size);
+    if(ret < 0) return FALSE;
+    // found new font successfully
+    g->font_size = new_size;
+    // redraw
+    gtk_widget_queue_draw(g->darea);
+    return FALSE;
+}
+
 static gboolean tty_read(GIOChannel *src, globals_t *g){
     gchar buf[16384];
     GError *err = NULL;
@@ -642,6 +672,8 @@ int main(int argc, char *argv[]){
             .set_modify_other = set_modify_other,
             .get_modify_other = get_modify_other,
         },
+        .font_name = "monospace",
+        .font_size = 10,
     };
     G = &g;
 
@@ -666,6 +698,10 @@ int main(int argc, char *argv[]){
     g_signal_connect(G_OBJECT(g.window), "focus-in-event", G_CALLBACK(on_focus_in), &g);
     g_signal_connect(G_OBJECT(g.window), "focus-out-event", G_CALLBACK(on_focus_out), &g);
 
+    // support ctrl+scroll zooming
+    gtk_widget_add_events(g.window, GDK_SCROLL_MASK);
+    g_signal_connect(G_OBJECT(g.window), "scroll-event", G_CALLBACK(on_scroll_event), &g);
+
     gtk_window_set_position(GTK_WINDOW(g.window), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(g.window), 400, 400);
     gtk_window_set_title(GTK_WINDOW(g.window), "nast");
@@ -673,7 +709,7 @@ int main(int argc, char *argv[]){
     gtk_widget_show_all(g.window);
 
     // create the terminal
-    tnew(&g.term, 80, 40, "monospace 10", (THooks*)&g);
+    tnew(&g.term, 80, 40, g.font_name, g.font_size, (THooks*)&g);
 
     char **cmd = argc > 1 ? argv+1 : NULL;
     g.ttyfd = ttynew(g.term, &g.pid, cmd);

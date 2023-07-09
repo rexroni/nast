@@ -172,7 +172,15 @@ void sendbreak(const Arg *);
 void toggleprinter(Term *t, const Arg *);
 
 int tattrset(Term *t, int);
-void tnew(Term **t, int col, int row, char *font_name, THooks *hooks);
+void tnew(
+    Term **tout,
+    int col,
+    int row,
+    char *font_name,
+    int font_size,
+    THooks *hooks
+);
+int tsetfont(Term *t, char *font_name, int font_size);
 void tresize(Term *t, int, int);
 void tsetdirtattr(Term *t, int);
 void ttyhangup(pid_t);

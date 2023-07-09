@@ -175,6 +175,8 @@ struct Term {
     // rendered dimensions, should be checked each re-render
     double render_w;
     double render_h;
+    double render_grid_w;
+    double render_grid_h;
 
     // main screen
     Screen main;
@@ -764,20 +766,29 @@ treset(Term *t)
     }
 }
 
-int
-tfont(
-    Term *t,
+int getfont(
     char *font_name,
+    int font_size,
     PangoFontDescription **desc_out,
     double *grid_w_out,
     double *grid_h_out
 ){
+    char font[256];
+    int l =  snprintf(font, sizeof(font), "%s %d", font_name, font_size);
+    if(l < 0){
+        fprintf(stderr, "error in snprintf()");
+        return -1;
+    }
+    if(l >= sizeof(font)){
+        fprintf(stderr, "font name too long");
+        return -1;
+    }
     /* Check that we can get a font description from the font name and make
        sure it is monospaced.  Output the description and the grid size.
        Return 0 on success or -1 on error. */
-    PangoFontDescription *desc = pango_font_description_from_string(font_name);
+    PangoFontDescription *desc = pango_font_description_from_string(font);
     if(!desc){
-        fprintf(stderr, "unable to process font \"%s\"\n", font_name);
+        fprintf(stderr, "unable to process font \"%s\"\n", font);
         return -1;
     }
 
@@ -820,7 +831,7 @@ tfont(
     int i_w = rect.width;
 
     if(m_w != i_w){
-        fprintf(stderr, "non-monospace font detected: \"%s\"\n", font_name);
+        fprintf(stderr, "non-monospace font detected: \"%s\"\n", font);
         goto fail;
     }
 
@@ -847,8 +858,14 @@ fail:
 }
 
 void
-tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
-{
+tnew(
+    Term **tout,
+    int col,
+    int row,
+    char *font_name,
+    int font_size,
+    THooks *hooks
+){
     Term *t = xmalloc(sizeof(Term));
     *t = (Term){
         .c = {
@@ -857,7 +874,7 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
         .hooks = hooks,
     };
 
-    int ret = tfont(t, font_name, &t->desc, &t->grid_w, &t->grid_h);
+    int ret = getfont(font_name, font_size, &t->desc, &t->grid_w, &t->grid_h);
     if(ret < 0){
         die("invalid font\n");
     }
@@ -899,6 +916,23 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
     treset(t);
 
     *tout = t;
+}
+
+int tsetfont(Term *t, char *font_name, int font_size){
+    PangoFontDescription *desc;
+    double grid_w, grid_h;
+    int ret = getfont(font_name, font_size, &desc, &grid_w, &grid_h);
+    if(ret < 0) return -1;
+
+    /* always unrender, in case new font has same dimensions as the old, in
+       which case the auto-rerender logic in trender() wouldn't be triggered */
+    tunrender(t);
+
+    pango_font_description_free(t->desc);
+    t->desc = desc;
+    t->grid_w = grid_w;
+    t->grid_h = grid_h;
+    return 0;
 }
 
 void
@@ -3538,11 +3572,17 @@ void trender(
 ){
     // TODO: only rerender the dirty parts
     (void)x1; (void)y1; (void)x2; (void)y2;
-    if(w != t->render_w || h != t->render_h){
+    if(
+        w != t->render_w || h != t->render_h
+        || t->render_grid_w != t->grid_w
+        || t->render_grid_h != t->grid_h
+    ){
         // delete old rendering
         tunrender(t);
         t->render_w = w;
         t->render_h = h;
+        t->render_grid_w = t->grid_w;
+        t->render_grid_h = t->grid_h;
         // resize the teriminal?
         int col = t->render_w / t->grid_w;
         int row = t->render_h / t->grid_h;
