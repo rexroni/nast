@@ -160,6 +160,8 @@ typedef struct {
     size_t len;       // number of lines in memory
     uint64_t line_id; // current line UID
     bool new_line_id_on_write; // should the next write set the line id?
+    // how many unrendered lines are below the viewing window
+    size_t window_off;
 } Screen;
 
 /* Internal representation of the screen */
@@ -184,9 +186,6 @@ struct Term {
     Screen alt;
     // points to either .main or .alt
     Screen *scr;
-
-    // how many unrendered lines are below the window
-    size_t scroll;
 
     // callbacks
     THooks *hooks;
@@ -310,13 +309,13 @@ static inline void set_rline(Screen *scr, size_t idx, RLine *rline){
     scr->rlines[rlines_idx(scr, idx)] = rline;
 }
 
-// convert absolute index to a view index, or what is currently in scroll view
-static inline size_t abs2view(Term *t, size_t idx){
-    return t->scr->len - t->row - t->scroll + idx;
+// convert absolute index to a view index, or what is currently in window
+static inline size_t abs2window(Term *t, size_t idx){
+    return t->scr->len - t->row - t->scr->window_off + idx;
 }
 
-static inline size_t view2abs(Term *t, size_t idx){
-    return idx + (t->scr->len - t->row - t->scroll);
+static inline size_t window2abs(Term *t, size_t idx){
+    return idx + (t->scr->len - t->row - t->scr->window_off);
 }
 
 // convert absolute index to a terminal index, or the bottom t->row rows
@@ -918,6 +917,10 @@ tnew(
     *tout = t;
 }
 
+int trows(Term *t){
+    return t->row;
+}
+
 int tsetfont(Term *t, char *font_name, int font_size){
     PangoFontDescription *desc;
     double grid_w, grid_h;
@@ -966,10 +969,10 @@ tnewline(Term *t, int first_col, bool continue_line)
         t->c.y--;
         scr_new_rline(t->scr, line_id, t->col);
 
-        // hold the scroll window in place, if needed and possible
-        if(t->scroll){
-            t->scroll++;
-            LIMIT(t->scroll, 0, t->scr->len - t->row);
+        // hold the window in place, if needed and possible
+        if(t->scr->window_off){
+            t->scr->window_off++;
+            LIMIT(t->scr->window_off, 0, t->scr->len - t->row);
         }
     }
 
@@ -3241,11 +3244,12 @@ tresize(Term *t, int col, int row)
         );
     }
 
-    /* TODO: Deal with scroll at some point.
-        - if scroll = 0, let it stay zero
+    /* TODO: Deal with window_off at some point.
+        - if window_off = 0, let it stay zero
         - otherwise try to keep the top line as the top line */
-    // (until then, just make sure scroll is always valid)
-    t->scroll = 0;
+    // TODO: deal with window_off in altscreen too
+    // (until then, just make sure window_off is always valid)
+    t->scr->window_off = 0;
 
     /* current cursor only: Discard lines in the buffer that are so low that
        the cursor would have to move downwards.
@@ -3297,6 +3301,12 @@ tresize(Term *t, int col, int row)
 
     // send a signal to the application in the terminal
     t->hooks->ttyresize(t->hooks, row, col);
+}
+
+void twindowmv(Term *t, int n){
+    if(!n) return;
+    LIMIT(n, -((int)t->scr->window_off), (int)(t->scr->len - t->row));
+    t->scr->window_off += n;
 }
 
 //////
@@ -3601,7 +3611,7 @@ void trender(
     };
 
     for(size_t i = 0; i < t->row; i++){
-        size_t y_abs = view2abs(t, i);
+        size_t y_abs = window2abs(t, i);
         RLine *rline = get_rline(t->scr, y_abs);
         // capture any format overrides
         fmt_overrides_t ovr = t_get_fmt_override(t, y_abs);

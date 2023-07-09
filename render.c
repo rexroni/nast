@@ -265,16 +265,16 @@ static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
 void shift_pgup(void *globals, GdkEventKey *event_key){
     (void)event_key;
     globals_t *g = globals;
-    (void)g;
-    die("shift_pgup\n");
+    twindowmv(g->term, trows(g->term) - 1);
+    gtk_widget_queue_draw(g->darea);
 }
 
 // shift_pgdn is a key action
 void shift_pgdn(void *globals, GdkEventKey *event_key){
     (void)event_key;
     globals_t *g = globals;
-    (void)g;
-    die("shift_pgdn\n");
+    twindowmv(g->term, -trows(g->term) + 1);
+    gtk_widget_queue_draw(g->darea);
 }
 
 // shift_insert is a key action

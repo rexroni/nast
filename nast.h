@@ -180,9 +180,10 @@ void tnew(
     int font_size,
     THooks *hooks
 );
+int trows(Term *t);
 int tsetfont(Term *t, char *font_name, int font_size);
 void tresize(Term *t, int, int);
-void tsetdirtattr(Term *t, int);
+void twindowmv(Term *t, int n);
 void ttyhangup(pid_t);
 int ttynew(Term *t, pid_t *pid, char **cmd);
 size_t ttyread(Term *t);
@@ -256,8 +257,8 @@ Rendering details:
 
     ring buffer, with logical indices from y=0 to y=rlines_len()-1
     "window" is a section of lines of term.rows length that is to be rendered
-    "scroll" is how many unrendered lines are after the window
-    scroll is a render-only concept, and ANSI codes are unaffected
+    "window_off" is how many unrendered lines are after the window
+    window_off is a render-only concept, and ANSI codes are unaffected
 
                   rlines
                    ___
@@ -265,15 +266,15 @@ Rendering details:
                   |___|
                   |___|
              ___  |___| __
-            /     |___|   |   y=window_start()
+            /     |___|   |
            /      |___|   |
-  render -+       |___|   |term.rows
+  render -+       |___|   | term.rows
   window   \      |___|   |
             \___  |___| __| __
                   |___|       |
                   |___|       |
-                  |___|       |term.scroll
+                  |___|       | screen.window_off
                   |___|       |
- y=rlines_len()-1 |___| ______|
+   y=screen.len-1 |___| ______|
 
 */
