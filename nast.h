@@ -221,6 +221,8 @@ bool rgb24_eq(struct rgb24 a, struct rgb24 b);
 
 int twrite(Term *t, const char *, int, int);
 RLine *rline_new(size_t n_glyphs, uint64_t line_id);
+// turn a line into an empty line
+void rline_clear(RLine *rline);
 void rline_free(RLine **rline);
 // insert a glpyh before the index
 void rline_insert_glyph(RLine *rline, size_t idx, Glyph g);

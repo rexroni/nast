@@ -159,6 +159,7 @@ typedef struct {
     size_t start;     // the oldest line in memory
     size_t len;       // number of lines in memory
     uint64_t line_id; // current line UID
+    bool new_line_id_on_write; // should the next write set the line id?
 } Screen;
 
 /* Internal representation of the screen */
@@ -259,6 +260,7 @@ static void tcursor(Term *t, int);
 static int tcursorstyle(Term *t, int);
 static void tdeletechar(Term *t, int);
 static void tdeleteline(Term *t, int);
+static void mod_line_group(Term *t, size_t, int);
 static void tinsertblank(Term *t, int);
 static void tinsertblankline(Term *t, int);
 // static int tlinelen(Term *t, int);
@@ -270,8 +272,8 @@ static void tputtab(Term *t, int);
 static void tputc(Term *t, Rune);
 static void treset(Term *t);
 static RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols);
-static void tscrollup(Term *t, int, int);
-static void tscrolldown(Term *t, int, int);
+static void tscrollup(Term *t, int, int, int);
+static void tscrolldown(Term *t, int, int, int);
 static void tsetattr(Term *t, int *, int);
 static void tsetchar(Term *t, Rune, Glyph *, int, int);
 static void tswapscreen(Term *t);
@@ -300,6 +302,10 @@ static inline size_t rlines_idx(Screen *scr, size_t idx){
 
 static inline RLine *get_rline(Screen *scr, size_t idx){
     return scr->rlines[rlines_idx(scr, idx)];
+}
+
+static inline void set_rline(Screen *scr, size_t idx, RLine *rline){
+    scr->rlines[rlines_idx(scr, idx)] = rline;
 }
 
 // convert absolute index to a view index, or what is currently in scroll view
@@ -867,8 +873,8 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
         t->main.rlines[rlines_idx(&t->main, t->main.len++)] =
             rline_new(col, 0);
     }
-    // the first line needs a real line id, since the cursor starts there
-    t->main.rlines[rlines_idx(&t->main, 0)]->line_id = new_line_id(&t->main);
+    // the first emitted character will set a valid line_id
+    t->main.new_line_id_on_write = true;
 
     // allocate history (altscreen, zero scrollback)
     t->alt.cap = row;
@@ -879,7 +885,7 @@ tnew(Term **tout, int col, int row, char *font_name, THooks *hooks)
         t->alt.rlines[rlines_idx(&t->alt, t->alt.len++)] =
             rline_new(col, 0);
     }
-    t->alt.rlines[rlines_idx(&t->alt, 0)]->line_id = new_line_id(&t->alt);
+    t->alt.new_line_id_on_write = true;
 
     // start on main screen
     t->scr = &t->main;
@@ -939,6 +945,7 @@ tnewline(Term *t, int first_col, bool continue_line)
     get_cursor_rline(t)->line_id = line_id;
 }
 
+// see https://vt100.net/docs/vt510-rm/chapter4.html, chapter 4.3.3
 void
 csiparse(void)
 {
@@ -980,6 +987,9 @@ void
 tmoveto(Term *t, int x, int y)
 {
     t->c.state &= ~CURSOR_WRAPNEXT;
+    /* any absolute line movements break line reflows, but only if a character
+       is actually typed there */
+    t->scr->new_line_id_on_write = true;
     t->c.x = LIMIT(x, 0, t->col-1);
     t->c.y = LIMIT(y, 0, t->row-1);
 }
@@ -1071,6 +1081,8 @@ tsetchar(Term *t, Rune u, Glyph *attr, int x, int y)
     die("update tsetchar");
 }
 
+// TODO: always set t->scr->new_line_id_on_write?  What about deletechar, that
+//       might be the only case where tclearregion might not trigger that...
 void
 tclearregion_abs(Term *t, int x1, int y1, int x2, int y2)
 {
@@ -1137,25 +1149,132 @@ tinsertblank(Term *t, int n)
 void
 tinsertblankline(Term *t, int n)
 {
-    die("update tinsertblankline");
+    // insert blank lines is just scrolling down from cursor to the bottom
+    tscrolldown(t, t->c.y, t->bot, n);
 }
 
 void
 tdeleteline(Term *t, int n)
 {
-    die("update tdeleteline");
+    // delete lines is just scrolling up from cursor to the bottom
+    tscrollup(t, t->c.y, t->bot, n);
 }
 
-void
-tscrollup(Term *t, int orig, int n)
-{
-    die("update tscrollup");
+// replace the line_ids of the contiguous group at y with a new line_id
+// dir can be +1 or -1, depending on which direction to look for matches
+void mod_line_group(Term *t, size_t idx, int dir){
+    // valid idx?
+    if(idx >= t->scr->len) return;
+    uint64_t old = get_rline(t->scr, idx)->line_id;
+    // valid line group?
+    if(old == 0) return;
+    uint64_t line_id = new_line_id(t->scr);
+    // loop tracks i with a 1-offset, to avoid underflow in dir=-1 case
+    for(size_t i = idx+1; i > 0 && i < t->scr->len + 1; i += dir){
+        RLine *rline = get_rline(t->scr, i-1);
+        if(rline->line_id != old) break;
+        rline->line_id = line_id;
+    }
 }
 
-void
-tscrolldown(Term *t, int orig, int n)
-{
-    die("update tscrolldown");
+// scroll lines upwards in a specified window, cursor stays in place
+/*
+   Example: t->row = 8, top = 1, bot = 6, n = 2
+
+     --------------------
+     0
+     1 top  <- 3
+     2      <- 4
+     3      <- 5
+     4      <- 6
+     5      <- new
+     6 bot  <- new
+     7
+     --------------------
+*/
+void tscrollup(Term *t, int top, int bot, int n){
+    LIMIT(top, 0, t->row - 1);
+    LIMIT(bot, 0, t->row - 1);
+    if(top >= bot) return;
+    LIMIT(n, 0, bot - top);
+    if(!n) return;
+    // step 1: wipe n lines clean
+    for(int i = top; i < top + n; i++){
+        rline_clear(get_rline(t->scr, term2abs(t, i)));
+    }
+    // step 2: rotate wiped rlines to the bottom of the the buffer
+    for(int i = 0; i < n; i++){
+        int old_idx = top + i;
+        // capture the wiped line
+        RLine *wiped = get_rline(t->scr, term2abs(t, old_idx));
+        // shift every nth line up n lines
+        int new_idx = old_idx + n;
+        while(new_idx <= bot){
+            set_rline(
+                t->scr,
+                term2abs(t, old_idx),
+                get_rline(t->scr, term2abs(t, new_idx))
+            );
+            old_idx = new_idx;
+            new_idx += n;
+        }
+        // the final slot is filled by the wiped line
+        set_rline(t->scr, old_idx, wiped);
+    }
+    // step 3: modify the new top line group's line_id, moving downwards
+    mod_line_group(t, term2abs(t, top), +1);
+    // scroll breaks line_ids
+    t->scr->new_line_id_on_write = true;
+}
+
+// scroll lines downwards in a specified window, cursor stays in place
+/*
+   Example: t->row = 8, top = 1, bot = 6, n = 2
+
+     --------------------
+     0
+     1 top  <- new
+     2      <- new
+     3      <- 1
+     4      <- 2
+     5      <- 3
+     6 bot  <- 4
+     7
+     --------------------
+*/
+void tscrolldown(Term *t, int top, int bot, int n){
+    LIMIT(top, 0, t->row - 1);
+    LIMIT(bot, 0, t->row - 1);
+    if(top >= bot) return;
+    LIMIT(n, 0, bot - top);
+    if(!n) return;
+    // step 1: wipe n lines clean
+    for(int i = bot + 1 - n; i < bot + 1; i++){
+        rline_clear(get_rline(t->scr, term2abs(t, i)));
+    }
+    // step 2: rotate wiped rlines to the top of the the buffer
+    for(int i = 0; i < n; i++){
+        int old_idx = bot - i;
+        // capture the wiped line
+        RLine *wiped = get_rline(t->scr, term2abs(t, old_idx));
+        // shift every nth line down n lines
+        int new_idx = old_idx - n;
+        while(new_idx >= top){
+            set_rline(
+                t->scr,
+                term2abs(t, old_idx),
+                get_rline(t->scr, term2abs(t, new_idx))
+            );
+            old_idx = new_idx;
+            new_idx -= n;
+        }
+        // the final slot is filled by the wiped line
+        set_rline(t->scr, term2abs(t, old_idx), wiped);
+    }
+    // step 3: modify the new bottom line group's line_id, moving upwards
+    mod_line_group(t, term2abs(t, bot + 1 - n), -1);
+    // scroll breaks line_ids
+    t->scr->new_line_id_on_write = true;
 }
 
 struct rgb24
@@ -1664,12 +1783,12 @@ csihandle(Term *t)
     case 'S': /* SU -- Scroll <n> line up */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tscrollup(t, t->top, csiescseq.arg[0]);
+        tscrollup(t, t->top, t->bot, csiescseq.arg[0]);
         break;
     case 'T': /* SD -- Scroll <n> line down */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tscrolldown(t, t->top, csiescseq.arg[0]);
+        tscrolldown(t, t->top, t->bot, csiescseq.arg[0]);
         break;
     case 'L': /* IL -- Insert <n> blank lines */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -2172,6 +2291,7 @@ strhandle(Term *t)
     strdump();
 }
 
+// see https://vt100.net/docs/vt510-rm/chapter4.html, section 4.3.4
 void
 strparse(void)
 {
@@ -2506,9 +2626,9 @@ eschandle(Term *t, uchar ascii)
         t->icharset = ascii - '(';
         t->esc |= ESC_ALTCHARSET;
         return 0;
-    case 'D': /* IND -- Linefeed */
+    case 'D': /* IND -- Linefeed, move cursor directly downwards */
         if (t->c.y == t->bot) {
-            tscrollup(t, t->top, 1);
+            tscrollup(t, t->top, t->bot, 1);
         } else {
             tmoveto(t, t->c.x, t->c.y+1);
         }
@@ -2519,9 +2639,9 @@ eschandle(Term *t, uchar ascii)
     case 'H': /* HTS -- Horizontal tab stop */
         t->tabs[t->c.x] = 1;
         break;
-    case 'M': /* RI -- Reverse index */
+    case 'M': /* RI -- Reverse index, move cursor directly upwards */
         if (t->c.y == t->top) {
-            tscrolldown(t, t->top, 1);
+            tscrolldown(t, t->top, t->bot, 1);
         } else {
             tmoveto(t, t->c.x, t->c.y-1);
         }
@@ -2693,6 +2813,11 @@ temit(Term *t, Rune u, int width)
         rline_insert_glyph(rline, t->c.x, g);
     }else{
         rline_set_glyph(rline, t->c.x, g);
+    }
+
+    // were we supposed to set the line id?
+    if(t->scr->new_line_id_on_write){
+        rline->line_id = new_line_id(t->scr);
     }
 
     if(t->c.x + width < t->col){
@@ -3183,6 +3308,16 @@ RLine *rline_new(size_t n_glyphs, uint64_t line_id){
     return rline;
 }
 
+void rline_clear(RLine *rline){
+    rline_unrender(rline);
+    rline->line_id = 0;
+    // set glyphs back to ' '
+    for(size_t i = 0; i < rline->n_glyphs; i++){
+        // default rune is ' ' so that cursor-on-empty-space works
+        rline->glyphs[i] = (Glyph){ .u = ' ', .mode = ATTR_NORENDER };
+    }
+}
+
 // create a new rline in the ring buffer, discarding the oldest one as needed.
 RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols){
     // is ring buffer full?
@@ -3337,6 +3472,7 @@ void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
 }
 
 void rline_unrender(RLine *rline){
+    if(!rline->srfc) return;
     cairo_surface_destroy(rline->srfc);
     rline->srfc = NULL;
 }
