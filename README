@@ -42,7 +42,6 @@ System Architecture
         - the backend implements the communication with the window manager
         - GTK abstracts the window manager, so we just deal with GTK anyway
         - inputs to the backend are GTK key and mouse events
-        - we filter inputs throught the GTK Input Method
         - outputs are that we tell GTK what to draw and when to redraw it
 
     C: backend / libnast interface
@@ -55,14 +54,13 @@ System Architecture
             - altering the clipboard
           and for things that must be passed to the application, such as:
             - giving bytes that should be written directly to the application
-            - enabling and disabling the passing of mouse inputs
-            - enabling appcursor and appkeypad mode, which change how certain
-              key inputs are encoded over the application/backend interface
 
     Example sequence: pressing the 'q' key:
         - window manager tells backend 'q' is hit (via B.)
-        - backend tells the application by writing a 'q' to the tty (via A.)
-        - application (or terminal itself) writes 'q' key back to stdout (via A.)
+        - backend sends keypress to libnast for filtering (via C.)
+        - libnast calls THook to tell backend to send 'q' to app (via C.)
+        - backend writes 'q' to the tty (via A.)
+        - application (or tty itself) writes 'q' key back to stdout (via A.)
         - backend reads 'q' on tty, passes it to libnast (via C.)
         - libnast updates the terminal state, updates canvas
         - libnast tells backend canvas is updated

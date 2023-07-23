@@ -24,12 +24,7 @@ typedef struct {
     int font_size;
 
     // rendering and io state
-    bool appcursor;
-    bool appkeypad;
     bool want_focus;
-
-    // 0 = off, 1 = alt/meta, 2 = ctrl/shift/alt/meta
-    int modify_other;
 
     int ttyfd;
     struct writable writable;
@@ -81,61 +76,6 @@ static void sendbreak_hook(THooks *thooks){
     }
 }
 
-static void set_mode(THooks *thooks, enum win_mode mode, int val){
-    globals_t *g = (globals_t*)thooks;
-
-    if(mode & MODE_APPCURSOR){
-        g->appcursor = (bool)val;
-    }
-
-    if(mode & MODE_APPKEYPAD){
-        g->appkeypad = (bool)val;
-    }
-
-    if(mode & MODE_VISIBLE) die("VISIBLE mode not handled\n");
-    if(mode & MODE_FOCUSED) die("FOCUSED mode not handled\n");
-    if(mode & MODE_MOUSEBTN) die("MOUSEBTN mode not handled\n");
-    if(mode & MODE_MOUSEMOTION) die("MOUSEMOTION mode not handled\n");
-    if(mode & MODE_REVERSE) die("REVERSE mode not handled\n");
-    if(mode & MODE_KBDLOCK) die("KBDLOCK mode not handled\n");
-    if(mode & MODE_HIDE){
-        // TODO: start rendering a cursor so that we can start hiding it.
-    }
-    if(mode & MODE_MOUSESGR) die("MOUSESGR mode not handled\n");
-    if(mode & MODE_8BIT){
-        // TODO: does 8bit mode mean anything to us?  Or 7bit mode?
-    }
-    if(mode & MODE_BLINK) die("BLINK mode not handled\n");
-    if(mode & MODE_FBLINK) die("FBLINK mode not handled\n");
-    if(mode & MODE_FOCUS){
-        g->want_focus = (bool)val;
-    }
-    if(mode & MODE_MOUSEX10) die("MOUSEX10 mode not handled\n");
-    if(mode & MODE_MOUSEMANY) die("MOUSEMANY mode not handled\n");
-    if(mode & MODE_NUMLOCK) die("NUMLOCK mode not handled\n");
-
-    // this one is a conglomerate of other modes
-    if(mode & MODE_MOUSE) die("MODE_MOUSE mode not handled\n");
-}
-
-static int get_mode(THooks *thooks, enum win_mode mode){
-    globals_t *g = (globals_t*)thooks;
-
-    if(mode & MODE_APPCURSOR){
-        return g->appcursor;
-    }
-
-    if(mode & MODE_APPKEYPAD){
-        return g->appkeypad;
-    }
-
-    if(mode & MODE_FOCUS){
-        return g->want_focus;
-    }
-
-    return 0;
-}
-
 void set_title(THooks *thooks, const char *title){
     (void)thooks;
     (void)title;
@@ -147,16 +87,6 @@ void set_clipboard(THooks *thooks, char *buf, size_t len){
     free(buf);
     (void)len;
     die("set_clipboard() not handled\n");
-}
-
-void set_modify_other(THooks *thooks, int lvl){
-    globals_t *g = (globals_t*)thooks;
-    g->modify_other = lvl;
-}
-
-int get_modify_other(THooks *thooks){
-    globals_t *g = (globals_t*)thooks;
-    return g->modify_other;
 }
 
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
@@ -261,30 +191,6 @@ static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
     return FALSE;
 }
 
-// shift_pgup is a key action
-void shift_pgup(void *globals, GdkEventKey *event_key){
-    (void)event_key;
-    globals_t *g = globals;
-    twindowmv(g->term, trows(g->term) - 1);
-    gtk_widget_queue_draw(g->darea);
-}
-
-// shift_pgdn is a key action
-void shift_pgdn(void *globals, GdkEventKey *event_key){
-    (void)event_key;
-    globals_t *g = globals;
-    twindowmv(g->term, -trows(g->term) + 1);
-    gtk_widget_queue_draw(g->darea);
-}
-
-// shift_insert is a key action
-void shift_insert(void *globals, GdkEventKey *event_key){
-    (void)event_key;
-    globals_t *g = globals;
-    (void)g;
-    die("shift_insert\n");
-}
-
 // developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-key-press-event
 static gboolean on_key_event(
     GtkWidget *widget, GdkEventKey *event_key, gpointer user_data
@@ -297,107 +203,107 @@ static gboolean on_key_event(
     // ignore releases
     if(event_key->type != GDK_KEY_PRESS) return TRUE;
 
-    size_t key_idx = (size_t)-1;
+    int key = -1;
     if(event_key->keyval < 128){
-        // ascii keys are 1:1 with key_idx
-        key_idx = event_key->keyval;
+        // ascii keys are 1:1 with key
+        key = event_key->keyval;
     }else{
-        // certain other keys have explicit mappings to a key_idx
+        // certain other keys have explicit mappings to a key
         switch(event_key->keyval){
             // see gtk-3.0/gdk/gdkkeysyms.h
-            case GDK_KEY_Home:      key_idx = NAST_KEY_HOME; break;
-            case GDK_KEY_End:       key_idx = NAST_KEY_END; break;
-            case GDK_KEY_Insert:    key_idx = NAST_KEY_INSERT; break;
-            case GDK_KEY_Delete:    key_idx = NAST_KEY_DELETE; break;
-            case GDK_KEY_Page_Up:   key_idx = NAST_KEY_PGUP; break;
-            case GDK_KEY_Page_Down: key_idx = NAST_KEY_PGDN; break;
-            case GDK_KEY_BackSpace: key_idx = NAST_KEY_BKSP; break;
-            case GDK_KEY_Return:    key_idx = NAST_KEY_ENTER; break;
+            case GDK_KEY_Home:      key = NAST_KEY_HOME; break;
+            case GDK_KEY_End:       key = NAST_KEY_END; break;
+            case GDK_KEY_Insert:    key = NAST_KEY_INSERT; break;
+            case GDK_KEY_Delete:    key = NAST_KEY_DELETE; break;
+            case GDK_KEY_Page_Up:   key = NAST_KEY_PGUP; break;
+            case GDK_KEY_Page_Down: key = NAST_KEY_PGDN; break;
+            case GDK_KEY_BackSpace: key = NAST_KEY_BKSP; break;
+            case GDK_KEY_Return:    key = NAST_KEY_ENTER; break;
             case GDK_KEY_ISO_Left_Tab:
             case GDK_KEY_KP_Tab:
-            case GDK_KEY_Tab:       key_idx = NAST_KEY_TAB; break;
-            case GDK_KEY_Escape:    key_idx = NAST_KEY_ESC; break;
+            case GDK_KEY_Tab:       key = NAST_KEY_TAB; break;
+            case GDK_KEY_Escape:    key = NAST_KEY_ESC; break;
 
-            case GDK_KEY_Up:        key_idx = NAST_KEY_UP; break;
-            case GDK_KEY_Down:      key_idx = NAST_KEY_DN; break;
-            case GDK_KEY_Right:     key_idx = NAST_KEY_RIGHT; break;
-            case GDK_KEY_Left:      key_idx = NAST_KEY_LEFT; break;
+            case GDK_KEY_Up:        key = NAST_KEY_UP; break;
+            case GDK_KEY_Down:      key = NAST_KEY_DN; break;
+            case GDK_KEY_Right:     key = NAST_KEY_RIGHT; break;
+            case GDK_KEY_Left:      key = NAST_KEY_LEFT; break;
 
-            case GDK_KEY_KP_0:      key_idx = NAST_KEY_KP0; break;
-            case GDK_KEY_KP_1:      key_idx = NAST_KEY_KP1; break;
-            case GDK_KEY_KP_2:      key_idx = NAST_KEY_KP2; break;
-            case GDK_KEY_KP_3:      key_idx = NAST_KEY_KP3; break;
-            case GDK_KEY_KP_4:      key_idx = NAST_KEY_KP4; break;
-            case GDK_KEY_KP_5:      key_idx = NAST_KEY_KP5; break;
-            case GDK_KEY_KP_6:      key_idx = NAST_KEY_KP6; break;
-            case GDK_KEY_KP_7:      key_idx = NAST_KEY_KP7; break;
-            case GDK_KEY_KP_8:      key_idx = NAST_KEY_KP8; break;
-            case GDK_KEY_KP_9:      key_idx = NAST_KEY_KP9; break;
+            case GDK_KEY_KP_0:      key = NAST_KEY_KP0; break;
+            case GDK_KEY_KP_1:      key = NAST_KEY_KP1; break;
+            case GDK_KEY_KP_2:      key = NAST_KEY_KP2; break;
+            case GDK_KEY_KP_3:      key = NAST_KEY_KP3; break;
+            case GDK_KEY_KP_4:      key = NAST_KEY_KP4; break;
+            case GDK_KEY_KP_5:      key = NAST_KEY_KP5; break;
+            case GDK_KEY_KP_6:      key = NAST_KEY_KP6; break;
+            case GDK_KEY_KP_7:      key = NAST_KEY_KP7; break;
+            case GDK_KEY_KP_8:      key = NAST_KEY_KP8; break;
+            case GDK_KEY_KP_9:      key = NAST_KEY_KP9; break;
 
-            case GDK_KEY_KP_Multiply: key_idx = NAST_KEY_KPASTERISK; break;
-            case GDK_KEY_KP_Subtract: key_idx = NAST_KEY_KPMINUS; break;
-            case GDK_KEY_KP_Add:      key_idx = NAST_KEY_KPPLUS; break;
-            case GDK_KEY_KP_Decimal:  key_idx = NAST_KEY_KPCOMMA; break;
-            case GDK_KEY_KP_Divide:   key_idx = NAST_KEY_KPSLASH; break;
-            case GDK_KEY_KP_Enter:    key_idx = NAST_KEY_KPENTER; break;
+            case GDK_KEY_KP_Multiply: key = NAST_KEY_KPASTERISK; break;
+            case GDK_KEY_KP_Subtract: key = NAST_KEY_KPMINUS; break;
+            case GDK_KEY_KP_Add:      key = NAST_KEY_KPPLUS; break;
+            case GDK_KEY_KP_Decimal:  key = NAST_KEY_KPCOMMA; break;
+            case GDK_KEY_KP_Divide:   key = NAST_KEY_KPSLASH; break;
+            case GDK_KEY_KP_Enter:    key = NAST_KEY_KPENTER; break;
 
-            case GDK_KEY_KP_Insert:    key_idx = NAST_KEY_KP0u; break;
-            case GDK_KEY_KP_End:       key_idx = NAST_KEY_KP1u; break;
-            case GDK_KEY_KP_Down:      key_idx = NAST_KEY_KP2u; break;
-            case GDK_KEY_KP_Page_Down: key_idx = NAST_KEY_KP3u; break;
-            case GDK_KEY_KP_Left:      key_idx = NAST_KEY_KP4u; break;
-            case GDK_KEY_KP_Begin:     key_idx = NAST_KEY_KP5u; break;
-            case GDK_KEY_KP_Right:     key_idx = NAST_KEY_KP6u; break;
-            case GDK_KEY_KP_Home:      key_idx = NAST_KEY_KP7u; break;
-            case GDK_KEY_KP_Up:        key_idx = NAST_KEY_KP8u; break;
-            case GDK_KEY_KP_Page_Up:   key_idx = NAST_KEY_KP9u; break;
+            case GDK_KEY_KP_Insert:    key = NAST_KEY_KP0u; break;
+            case GDK_KEY_KP_End:       key = NAST_KEY_KP1u; break;
+            case GDK_KEY_KP_Down:      key = NAST_KEY_KP2u; break;
+            case GDK_KEY_KP_Page_Down: key = NAST_KEY_KP3u; break;
+            case GDK_KEY_KP_Left:      key = NAST_KEY_KP4u; break;
+            case GDK_KEY_KP_Begin:     key = NAST_KEY_KP5u; break;
+            case GDK_KEY_KP_Right:     key = NAST_KEY_KP6u; break;
+            case GDK_KEY_KP_Home:      key = NAST_KEY_KP7u; break;
+            case GDK_KEY_KP_Up:        key = NAST_KEY_KP8u; break;
+            case GDK_KEY_KP_Page_Up:   key = NAST_KEY_KP9u; break;
 
-            case GDK_KEY_KP_Delete:    key_idx = NAST_KEY_KPCOMMAu; break;
+            case GDK_KEY_KP_Delete:    key = NAST_KEY_KPCOMMAu; break;
 
             case GDK_KEY_KP_F1:
-            case GDK_KEY_F1:        key_idx = NAST_KEY_F1; break;
+            case GDK_KEY_F1:        key = NAST_KEY_F1; break;
             case GDK_KEY_KP_F2:
-            case GDK_KEY_F2:        key_idx = NAST_KEY_F2; break;
+            case GDK_KEY_F2:        key = NAST_KEY_F2; break;
             case GDK_KEY_KP_F3:
-            case GDK_KEY_F3:        key_idx = NAST_KEY_F3; break;
+            case GDK_KEY_F3:        key = NAST_KEY_F3; break;
             case GDK_KEY_KP_F4:
-            case GDK_KEY_F4:        key_idx = NAST_KEY_F4; break;
+            case GDK_KEY_F4:        key = NAST_KEY_F4; break;
 
-            case GDK_KEY_F5:        key_idx = NAST_KEY_F5; break;
-            case GDK_KEY_F6:        key_idx = NAST_KEY_F6; break;
-            case GDK_KEY_F7:        key_idx = NAST_KEY_F7; break;
-            case GDK_KEY_F8:        key_idx = NAST_KEY_F8; break;
-            case GDK_KEY_F9:        key_idx = NAST_KEY_F9; break;
-            case GDK_KEY_F10:       key_idx = NAST_KEY_F10; break;
-            case GDK_KEY_F11:       key_idx = NAST_KEY_F11; break;
-            case GDK_KEY_F12:       key_idx = NAST_KEY_F12; break;
-            case GDK_KEY_F13:       key_idx = NAST_KEY_F13; break;
-            case GDK_KEY_F14:       key_idx = NAST_KEY_F14; break;
-            case GDK_KEY_F15:       key_idx = NAST_KEY_F15; break;
-            case GDK_KEY_F16:       key_idx = NAST_KEY_F16; break;
-            case GDK_KEY_F17:       key_idx = NAST_KEY_F17; break;
-            case GDK_KEY_F18:       key_idx = NAST_KEY_F18; break;
-            case GDK_KEY_F19:       key_idx = NAST_KEY_F19; break;
-            case GDK_KEY_F20:       key_idx = NAST_KEY_F20; break;
-            case GDK_KEY_F21:       key_idx = NAST_KEY_F21; break;
-            case GDK_KEY_F22:       key_idx = NAST_KEY_F22; break;
-            case GDK_KEY_F23:       key_idx = NAST_KEY_F23; break;
-            case GDK_KEY_F24:       key_idx = NAST_KEY_F24; break;
-            case GDK_KEY_F25:       key_idx = NAST_KEY_F25; break;
-            case GDK_KEY_F26:       key_idx = NAST_KEY_F26; break;
-            case GDK_KEY_F27:       key_idx = NAST_KEY_F27; break;
-            case GDK_KEY_F28:       key_idx = NAST_KEY_F28; break;
-            case GDK_KEY_F29:       key_idx = NAST_KEY_F29; break;
-            case GDK_KEY_F30:       key_idx = NAST_KEY_F30; break;
-            case GDK_KEY_F31:       key_idx = NAST_KEY_F31; break;
-            case GDK_KEY_F32:       key_idx = NAST_KEY_F32; break;
-            case GDK_KEY_F33:       key_idx = NAST_KEY_F33; break;
-            case GDK_KEY_F34:       key_idx = NAST_KEY_F34; break;
-            case GDK_KEY_F35:       key_idx = NAST_KEY_F35; break;
+            case GDK_KEY_F5:        key = NAST_KEY_F5; break;
+            case GDK_KEY_F6:        key = NAST_KEY_F6; break;
+            case GDK_KEY_F7:        key = NAST_KEY_F7; break;
+            case GDK_KEY_F8:        key = NAST_KEY_F8; break;
+            case GDK_KEY_F9:        key = NAST_KEY_F9; break;
+            case GDK_KEY_F10:       key = NAST_KEY_F10; break;
+            case GDK_KEY_F11:       key = NAST_KEY_F11; break;
+            case GDK_KEY_F12:       key = NAST_KEY_F12; break;
+            case GDK_KEY_F13:       key = NAST_KEY_F13; break;
+            case GDK_KEY_F14:       key = NAST_KEY_F14; break;
+            case GDK_KEY_F15:       key = NAST_KEY_F15; break;
+            case GDK_KEY_F16:       key = NAST_KEY_F16; break;
+            case GDK_KEY_F17:       key = NAST_KEY_F17; break;
+            case GDK_KEY_F18:       key = NAST_KEY_F18; break;
+            case GDK_KEY_F19:       key = NAST_KEY_F19; break;
+            case GDK_KEY_F20:       key = NAST_KEY_F20; break;
+            case GDK_KEY_F21:       key = NAST_KEY_F21; break;
+            case GDK_KEY_F22:       key = NAST_KEY_F22; break;
+            case GDK_KEY_F23:       key = NAST_KEY_F23; break;
+            case GDK_KEY_F24:       key = NAST_KEY_F24; break;
+            case GDK_KEY_F25:       key = NAST_KEY_F25; break;
+            case GDK_KEY_F26:       key = NAST_KEY_F26; break;
+            case GDK_KEY_F27:       key = NAST_KEY_F27; break;
+            case GDK_KEY_F28:       key = NAST_KEY_F28; break;
+            case GDK_KEY_F29:       key = NAST_KEY_F29; break;
+            case GDK_KEY_F30:       key = NAST_KEY_F30; break;
+            case GDK_KEY_F31:       key = NAST_KEY_F31; break;
+            case GDK_KEY_F32:       key = NAST_KEY_F32; break;
+            case GDK_KEY_F33:       key = NAST_KEY_F33; break;
+            case GDK_KEY_F34:       key = NAST_KEY_F34; break;
+            case GDK_KEY_F35:       key = NAST_KEY_F35; break;
         }
     }
 
-    if(key_idx == (size_t)-1){
+    if(key == -1){
         if(event_key->type == GDK_KEY_PRESS){
             fprintf(stderr, "unhandled keypress! (0x%x)\n", event_key->keyval);
         }
@@ -405,64 +311,15 @@ static gboolean on_key_event(
     }
 
     unsigned int state = event_key->state;
-    int modify_other = g->modify_other;
-    int mods = (CTRL_MASK * !!(state & GDK_CONTROL_MASK))
-             | (SHIFT_MASK * !!(state & GDK_SHIFT_MASK))
-             | (ALT_MASK * !!(state & GDK_MOD1_MASK))
-             | (META_MASK * !!(state & GDK_META_MASK))
-             | (CURS_MASK * g->appcursor)
-             | (KPAD_MASK * g->appkeypad)
-             | (MOK1_MASK * (modify_other >= 1))  // at lvl 2, lvl 1 is also on
-             | (MOK2_MASK * (modify_other == 2));
+    unsigned int mods = (CTRL_MASK * !!(state & GDK_CONTROL_MASK))
+                      | (SHIFT_MASK * !!(state & GDK_SHIFT_MASK))
+                      | (ALT_MASK * !!(state & GDK_MOD1_MASK))
+                      | (META_MASK * !!(state & GDK_META_MASK));
 
-    key_map_t *map = keymap[key_idx];
-
-    // pick the first key from the keymap where all relevant mods are matched
-    size_t i = 0;
-    while(true){
-        unsigned int mask = map[i].mask;
-        // make a mask for the values of the modifiers we care about
-        unsigned int important = (mask & MOD_SELECTOR) << 1;
-        if((mods & important) == (mask & important)) break;
-        i++;
-    }
-
-    char buf[128];
-    key_action_t *act = map[i].action;
-    switch(act->type){
-        case KEY_ACTION_SIMPLE: {
-            char *text = act->val.simple.text;
-            size_t len = act->val.simple.len;
-            /* the ALTIFY flag on the zeroth element dictates if we allow alt
-               to add 128 to the output */
-            if((map[0].mask & ALTIFY) && (ALT_MASK & mods)){
-                Rune r = text[0];
-                len = utf8encode(r + 128, buf);
-                ttywrite(g, buf, len, 0);
-            }else{
-                ttywrite(g, text, len, 0);
-            }
-        } break;
-        case KEY_ACTION_MODS: {
-            char *fmt = act->val.mods;
-            int mod_idx = 1
-                        + 1 * !!(SHIFT_MASK & mods)
-                        + 2 * !!(ALT_MASK & mods)
-                        + 4 * !!(CTRL_MASK & mods)
-                        + 8 * !!(META_MASK & mods);
-            int ilen = sprintf(buf, fmt, mod_idx);
-            if(ilen < 1){
-                fprintf(stderr, "failed to sprintf(%s, %d)\n", fmt, mod_idx);
-            }else{
-                ttywrite(g, buf, (size_t)ilen, 0);
-            }
-        } break;
-        case KEY_ACTION_FUNC:
-            // execute the action and end the entire function
-            act->val.func(g, event_key);
-            break;
-    }
-    return TRUE;
+    key_ev_t ev = { key, mods };
+    int redraw = tkeyev(g->term, ev);
+    if(redraw) gtk_widget_queue_draw(g->darea);
+    return FALSE;
 }
 
 // developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-focus-in-event
@@ -473,9 +330,7 @@ static gboolean on_focus_in(
     (void)widget;
     (void)event;
     globals_t *g = user_data;
-    if(g->want_focus){
-        ttywrite(g, "\x1b[I", 3, 0);
-    }
+    tfocusev(g->term, true);
     return FALSE;
 }
 
@@ -487,9 +342,45 @@ static gboolean on_focus_out(
     (void)widget;
     (void)event;
     globals_t *g = user_data;
-    if(g->want_focus){
-        ttywrite(g, "\x1b[O", 3, 0);
+    tfocusev(g->term, false);
+    return FALSE;
+}
+
+// https://docs.gtk.org/gtk3/signal.Widget.button-press-event.html
+// https://docs.gtk.org/gdk3/struct.EventButton.html
+static gboolean on_button_event(
+    GtkWidget *widget, GdkEventButton *event, gpointer user_data
+){
+    (void)widget;
+    unsigned int modstate = event->state & GDK_MODIFIER_MASK;
+    globals_t *g = user_data;
+    /* Discard doubleclick and tripleclick events, we'll just recalculate them.
+       GTK's logic is weird anyway, since the second click of a doubleclick
+       sends both a BUTTON_PRESS and a 2BUTTON_PRESS */
+    if(event->type == GDK_2BUTTON_PRESS) return TRUE;
+    if(event->type == GDK_3BUTTON_PRESS) return FALSE;
+
+    // remaining events are passed straight to the terminal
+    mouse_ev_e type;
+    if(event->type == GDK_BUTTON_PRESS){
+        type = MOUSE_EV_PRESS;
+    }else{
+        type = MOUSE_EV_RELEASE;
     }
+    mouse_ev_t ev = {
+        .type = type,
+        .mods = (CTRL_MASK * !!(modstate & GDK_CONTROL_MASK))
+              | (SHIFT_MASK * !!(modstate & GDK_SHIFT_MASK))
+              | (ALT_MASK * !!(modstate & GDK_MOD1_MASK))
+              | (META_MASK * !!(modstate & GDK_META_MASK)),
+        .ms = event->time,
+        .n = event->button,
+        .x = (int)event->x,
+        .y = (int)event->y,
+        .pix_coords = true,
+    };
+    bool redraw = tmouseev(g->term, ev);
+    if(redraw) gtk_widget_queue_draw(g->darea);
     return FALSE;
 }
 
@@ -498,25 +389,51 @@ static gboolean on_focus_out(
 static gboolean on_scroll_event(
     GtkWidget* widget, GdkEventScroll *event, gpointer user_data
 ){
-    if(~event->state & GDK_CONTROL_MASK) return TRUE;
-    int dz;
+    globals_t *g = user_data;
+    // gdk tracks other modifiers we don't care about, so this isn't stable:
+    // unsigned int modstate = event->state & GDK_MODIFIER_MASK;
+    unsigned int modstate = event->state & (
+        GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_MOD1_MASK | GDK_META_MASK
+    );
+    int n = 0;
     if(event->direction == GDK_SCROLL_UP){
-        dz = +1;
+        n = +1;
     }else if(event->direction == GDK_SCROLL_DOWN){
-        dz = -1;
+        n = -1;
     }else{
+        // not scroll up or scroll down
         return TRUE;
     }
-    globals_t *g = user_data;
-    int new_size = g->font_size + dz;
-    // don't let font_size drop to zero
-    if(new_size == 0) return FALSE;
-    int ret = tsetfont(g->term, g->font_name, new_size);
-    if(ret < 0) return FALSE;
-    // found new font successfully
-    g->font_size = new_size;
-    // redraw
-    gtk_widget_queue_draw(g->darea);
+
+    // intercept ctrl+scroll for zoom
+    if(modstate == GDK_CONTROL_MASK){
+        // ctrl+scroll
+        int new_size = g->font_size + n;
+        // don't let font_size drop to zero
+        if(new_size == 0) return FALSE;
+        int ret = tsetfont(g->term, g->font_name, new_size);
+        if(ret < 0) return FALSE;
+        // found new font successfully
+        g->font_size = new_size;
+        gtk_widget_queue_draw(g->darea);
+        return FALSE;
+    }
+
+    // anything else is passed straight to terminal
+    mouse_ev_t ev = {
+        .type = MOUSE_EV_SCROLL,
+        .mods = (CTRL_MASK * !!(modstate & GDK_CONTROL_MASK))
+              | (SHIFT_MASK * !!(modstate & GDK_SHIFT_MASK))
+              | (ALT_MASK * !!(modstate & GDK_MOD1_MASK))
+              | (META_MASK * !!(modstate & GDK_META_MASK)),
+        .ms = event->time,
+        .n = n,
+        .x = (int)event->x,
+        .y = (int)event->y,
+        .pix_coords = true,
+    };
+    bool redraw = tmouseev(g->term, ev);
+    if(redraw) gtk_widget_queue_draw(g->darea);
     return FALSE;
 }
 
@@ -665,12 +582,8 @@ int main(int argc, char *argv[]){
             .ttyhangup = ttyhangup_hook,
             .bell = bell_hook,
             .sendbreak = sendbreak_hook,
-            .set_mode = set_mode,
-            .get_mode = get_mode,
             .set_title = set_title,
             .set_clipboard = set_clipboard,
-            .set_modify_other = set_modify_other,
-            .get_modify_other = get_modify_other,
         },
         .font_name = "monospace",
         .font_size = 10,
@@ -688,9 +601,11 @@ int main(int argc, char *argv[]){
     g_signal_connect(G_OBJECT(g.darea), "draw", G_CALLBACK(on_draw_event), &g);
     g_signal_connect(G_OBJECT(g.window), "destroy", G_CALLBACK(gtk_main_quit), &g);
 
-    //// get keypresses from the drawing area (does not work)
-    // gtk_widget_add_events(GTK_WIDGET(darea), GDK_KEY_PRESS_MASK);
-    // g_signal_connect(G_OBJECT(darea), "key-press-event", G_CALLBACK(on_key_press), NULL);
+    // // get keypresses from the drawing area (does not work)
+    // gtk_widget_add_events(GTK_WIDGET(g.darea), GDK_KEY_PRESS_MASK);
+    // gtk_widget_add_events(GTK_WIDGET(g.darea), GDK_KEY_RELEASE_MASK);
+    // g_signal_connect(G_OBJECT(g.darea), "key-press-event", G_CALLBACK(on_key_event), NULL);
+    // g_signal_connect(G_OBJECT(g.darea), "key-release-event", G_CALLBACK(on_key_event), NULL);
 
     // get keypresses from the window (does work)
     g_signal_connect(G_OBJECT(g.window), "key-press-event", G_CALLBACK(on_key_event), &g);
@@ -698,9 +613,16 @@ int main(int argc, char *argv[]){
     g_signal_connect(G_OBJECT(g.window), "focus-in-event", G_CALLBACK(on_focus_in), &g);
     g_signal_connect(G_OBJECT(g.window), "focus-out-event", G_CALLBACK(on_focus_out), &g);
 
-    // support ctrl+scroll zooming
-    gtk_widget_add_events(g.window, GDK_SCROLL_MASK);
-    g_signal_connect(G_OBJECT(g.window), "scroll-event", G_CALLBACK(on_scroll_event), &g);
+    // mouse buttons
+    // strangely, if I connect button press to the g.window I get duplicate events
+    gtk_widget_add_events(g.darea, GDK_BUTTON_PRESS_MASK);
+    gtk_widget_add_events(g.darea, GDK_BUTTON_RELEASE_MASK);
+    g_signal_connect(G_OBJECT(g.darea), "button-press-event", G_CALLBACK(on_button_event), &g);
+    g_signal_connect(G_OBJECT(g.darea), "button-release-event", G_CALLBACK(on_button_event), &g);
+
+    // mouse scroll
+    gtk_widget_add_events(g.darea, GDK_SCROLL_MASK);
+    g_signal_connect(G_OBJECT(g.darea), "scroll-event", G_CALLBACK(on_scroll_event), &g);
 
     gtk_window_set_position(GTK_WINDOW(g.window), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(g.window), 400, 400);

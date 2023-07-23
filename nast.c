@@ -20,6 +20,7 @@
 
 #include "nast.h"
 #include "strs.h"
+#include "keymap.h"
 
 #include "xtgettcap.h"
 
@@ -92,6 +93,17 @@ enum term_mode {
        basically be a detail of the interface between libnast and the backend
        (see architecture diagram in README) and not a window mode. */
     MODE_BRCKTPASTE  = 1 << 8,
+
+    // right now, none of these are actually honored
+    MODE_VISIBLE     = 1 << 9,
+    MODE_FOCUSED     = 1 << 10,
+    MODE_REVERSE     = 1 << 11,
+    MODE_KBDLOCK     = 1 << 12,
+    MODE_HIDE        = 1 << 13,
+    MODE_8BIT        = 1 << 15,
+    MODE_BLINK       = 1 << 16,
+    MODE_FBLINK      = 1 << 17,
+    MODE_NUMLOCK     = 1 << 18,
 };
 
 enum cursor_movement {
@@ -164,10 +176,32 @@ typedef struct {
     size_t window_off;
 } Screen;
 
+typedef enum {
+    MOUSE_BUTTON = 1 << 0,
+    MOUSE_MOTION = 1 << 1,
+    MOUSE_X10    = 1 << 2,
+    MOUSE_MANY   = 1 << 3,
+    MOUSE_SGR    = 1 << 4,
+    MOUSE_ALL    = MOUSE_BUTTON | MOUSE_MOTION | MOUSE_X10 | MOUSE_MANY,
+} mouse_mode_e;
+
 /* Internal representation of the screen */
 struct Term {
     int row;      /* nb row */
     int col;      /* nb col */
+
+    // keyboard modes
+    bool appkeypad;
+    bool appcursor;
+    // 0 = off, 1 = alt/meta, 2 = ctrl/shift/alt/meta
+    int modify_other;
+
+    // mouse stuff
+    mouse_mode_e mouse;
+    uint32_t press_history[2];
+
+    // focus mode
+    bool want_focus;
 
     // font stuff
     PangoFontDescription *desc;
@@ -675,6 +709,129 @@ ttyread(Term *t)
     return ret;
 }
 
+// returns true if the event should cause a rerender
+bool tkeyev(Term *t, key_ev_t ev){
+    // build full mods, including terminal state
+    int modify_other = t->modify_other;
+    unsigned int mods = ev.mods;
+    mods |= (CURS_MASK * t->appcursor);
+    mods |= (KPAD_MASK * t->appkeypad);
+    mods |= (MOK1_MASK * (modify_other >= 1));  // at lvl 2, lvl 1 is also on
+    mods |= (MOK2_MASK * (modify_other == 2));
+
+    key_map_t *map = keymap[ev.key];
+
+    // pick the first key from the keymap where all relevant mods are matched
+    size_t i = 0;
+    while(true){
+        unsigned int mask = map[i].mask;
+        // make a mask for the values of the modifiers we care about
+        unsigned int important = (mask & MOD_SELECTOR) << 1;
+        if((mods & important) == (mask & important)) break;
+        i++;
+    }
+
+    char buf[128];
+    key_action_t *act = map[i].action;
+    switch(act->type){
+        case KEY_ACTION_SIMPLE: {
+            char *text = act->val.simple.text;
+            size_t len = act->val.simple.len;
+            /* the ALTIFY flag on the zeroth element dictates if we allow alt
+               to add 128 to the output */
+            if((map[0].mask & ALTIFY) && (ALT_MASK & mods)){
+                Rune r = text[0];
+                len = utf8encode(r + 128, buf);
+                t->hooks->ttywrite(t->hooks, buf, len);
+            }else{
+                t->hooks->ttywrite(t->hooks, text, len);
+            }
+        } break;
+
+        case KEY_ACTION_MODS: {
+            char *fmt = act->val.mods;
+            int mod_idx = 1
+                        + 1 * !!(SHIFT_MASK & mods)
+                        + 2 * !!(ALT_MASK & mods)
+                        + 4 * !!(CTRL_MASK & mods)
+                        + 8 * !!(META_MASK & mods);
+            int ilen = sprintf(buf, fmt, mod_idx);
+            if(ilen < 1){
+                fprintf(stderr, "failed to sprintf(%s, %d)\n", fmt, mod_idx);
+            }else{
+                t->hooks->ttywrite(t->hooks, buf, (size_t)ilen);
+            }
+        } break;
+
+        case KEY_ACTION_SHIFT_PGUP:
+            twindowmv(t, t->row - 1);
+            return true;
+
+        case KEY_ACTION_SHIFT_PGDN:
+            twindowmv(t, -t->row + 1);
+            return true;
+
+        case KEY_ACTION_SHIFT_INSERT:
+            die("shift+insert");
+    }
+    return false;
+}
+
+static int mouse_register_press(uint32_t *hist, uint32_t ms){
+    // detect first click, initialize buffer
+    if(hist[0] == 0 && hist[1] == 0){
+        hist[0] = ms - 1000;
+        hist[1] = ms - 1000;
+    }
+    // snapshot history and leftshift
+    uint32_t twoago = hist[0];
+    uint32_t oneago = hist[1];
+    hist[0] = hist[1];
+    hist[1] = ms;
+
+    /* Replicate gtk's click logic:
+       - doubleclick = within 250ms
+       - tripleclick = doubleclick, then a third within 500ms of first */
+
+    if(oneago - twoago < 250 && ms - twoago < 500) return 3;
+    if(ms - oneago < 250) return 2;
+
+    return 1;
+}
+
+// returns true if the event should cause a rerender
+bool tmouseev(Term *t, mouse_ev_t ev){
+    if(ev.type == MOUSE_EV_PRESS){
+        int click = mouse_register_press(t->press_history, ev.ms);
+        // we don't do anything with this yet
+        (void)click;
+    }
+    if(ev.type == MOUSE_EV_SCROLL){
+        // TODO: support alternateScroll mode and send scroll to application
+        // for now, always scroll the view
+        return twindowmv(t, ev.n);
+        int n = ev.n;
+        LIMIT(n,
+            -((int)t->scr->window_off),
+            (int)(t->scr->len - t->row - t->scr->window_off)
+        );
+        if(!n) return false;
+        t->scr->window_off += n;
+        return true;
+    }
+    return false;
+}
+
+bool tfocusev(Term *t, bool focused){
+    if(!t->want_focus) return false;
+    if(focused){
+        t->hooks->ttywrite(t->hooks, "\x1b[I", 3);
+    }else{
+        t->hooks->ttywrite(t->hooks, "\x1b[O", 3);
+    }
+    return false;
+}
+
 bool
 t_isset_crlf(Term *t){
     return IS_SET(t, MODE_CRLF);
@@ -683,22 +840,6 @@ t_isset_crlf(Term *t){
 bool
 t_isset_echo(Term *t){
     return IS_SET(t, MODE_ECHO);
-}
-
-int
-tattrset(Term *t, int attr)
-{
-    die("tattrset!\n");
-    // int i, j;
-
-    // for (i = 0; i < t->row-1; i++) {
-    //     for (j = 0; j < t->col-1; j++) {
-    //         if (t->line[i][j].mode & attr)
-    //             return 1;
-    //     }
-    // }
-
-    return 0;
 }
 
 void
@@ -1477,6 +1618,11 @@ tscrollregion(Term *t, int top, int bot)
     t->bot = bot;
 }
 
+static int bitcfg(int mode, int mask, bool set){
+    if(set) return mode |= mask;
+    return mode &= ~mask;
+}
+
 void
 tsetmode(Term *t, int priv, int set, int *args, int narg)
 {
@@ -1486,10 +1632,10 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
         if (priv) {
             switch (*args) {
             case 1: /* DECCKM -- Cursor key */
-                t->hooks->set_mode(t->hooks, MODE_APPCURSOR, set);
+                t->appcursor = set;
                 break;
             case 5: /* DECSCNM -- Reverse video */
-                t->hooks->set_mode(t->hooks, MODE_REVERSE, set);
+                t->mode = bitcfg(t->mode, MODE_REVERSE, set);
                 break;
             case 6: /* DECOM -- Origin */
                 MODBIT(t->c.state, set, CURSOR_ORIGIN);
@@ -1509,36 +1655,33 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
             case 12: /* att610 -- Start blinking cursor (IGNORED) */
                 break;
             case 25: /* DECTCEM -- Text Cursor Enable Mode */
-                t->hooks->set_mode(t->hooks, MODE_HIDE, !set);
+                t->mode = bitcfg(t->mode, MODE_HIDE, !set);
                 break;
             case 9:    /* X10 mouse compatibility mode */
-                // xsetpointermotion(0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSE, 0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSEX10, set);
+                t->mouse &= ~MOUSE_ALL;
+                if(set) t->mouse |= MOUSE_X10;
                 break;
             case 1000: /* 1000: report button press */
-                // xsetpointermotion(0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSE, 0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSEBTN, set);
+                t->mouse &= ~MOUSE_ALL;
+                if(set) t->mouse |= MOUSE_BUTTON;
                 break;
             case 1002: /* 1002: report motion on button press */
-                // xsetpointermotion(0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSE, 0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSEMOTION, set);
+                t->mouse &= ~MOUSE_ALL;
+                if(set) t->mouse |= MOUSE_MOTION;
                 break;
             case 1003: /* 1003: enable all mouse motions */
-                // xsetpointermotion(set);
-                t->hooks->set_mode(t->hooks, MODE_MOUSE, 0);
-                t->hooks->set_mode(t->hooks, MODE_MOUSEMANY, set);
+                t->mouse &= ~MOUSE_ALL;
+                if(set) t->mouse |= MOUSE_MANY;
                 break;
             case 1004: /* 1004: send focus events to tty */
-                t->hooks->set_mode(t->hooks, MODE_FOCUS, set);
+                t->want_focus = set;
                 break;
             case 1006: /* 1006: extended reporting mode */
-                t->hooks->set_mode(t->hooks, MODE_MOUSESGR, set);
+                if(set) t->mouse |= MOUSE_SGR;
+                else t->mouse &= ~MOUSE_SGR;
                 break;
             case 1034:
-                t->hooks->set_mode(t->hooks, MODE_8BIT, set);
+                t->mode = bitcfg(t->mode, MODE_8BIT, set);
                 break;
             case 1035:
                 if(set) die("special modifiers for alt and numlock keys\n");
@@ -1586,7 +1729,7 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
             case 0:  /* Error (IGNORED) */
                 break;
             case 2:
-                t->hooks->set_mode(t->hooks, MODE_KBDLOCK, set);
+                t->mode = bitcfg(t->mode, MODE_KBDLOCK, set);
                 break;
             case 4:  /* IRM -- Insertion-replacement */
                 MODBIT(t->mode, set, MODE_INSERT);
@@ -1618,27 +1761,27 @@ int tgetmode(Term *t, int priv, int arg){
     if (priv) {
         switch (arg) {
         case 1: /* DECCKM -- Cursor key */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_APPCURSOR);
+            return 1 + !t->appcursor;
         case 5: /* DECSCNM -- Reverse video */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_REVERSE);
+            return 1 + !(t->mode & MODE_REVERSE);
         case 6: /* DECOM -- Origin */
             return 1 + !(t->c.state & CURSOR_ORIGIN);
         case 7: /* DECAWM -- Auto wrap */
             return 1 + !(t->mode & MODE_WRAP);
         case 25: /* DECTCEM -- Text Cursor Enable Mode */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_HIDE);
+            return 1 + !(t->mode & MODE_HIDE);
         case 9:    /* X10 mouse compatibility mode */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSEX10);
+            return 1 + !(t->mouse & MOUSE_X10);
         case 1000: /* 1000: report button press */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSEBTN);
+            return 1 + !(t->mouse & MOUSE_BUTTON);
         case 1002: /* 1002: report motion on button press */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSEMOTION);
+            return 1 + !(t->mouse & MOUSE_MOTION);
         case 1004: /* 1004: send focus events to tty */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_FOCUS);
+            return 1 + !t->want_focus;
         case 1006: /* 1006: extended reporting mode */
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_MOUSESGR);
+            return 1 + !(t->mouse & MOUSE_SGR);
         case 1034:
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_8BIT);
+            return 1 + !(t->mode & MODE_8BIT);
         case 2004: /* 2004: bracketed paste mode */
             // see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
             // search for "Ps = 2 0 0 4"
@@ -1652,7 +1795,7 @@ int tgetmode(Term *t, int priv, int arg){
     } else {
         switch (arg) {
         case 2:
-            return 1 + !t->hooks->get_mode(t->hooks, MODE_KBDLOCK);
+            return 1 + !(t->mode & MODE_KBDLOCK);
         case 4:  /* IRM -- Insertion-replacement */
             return 1 + !(t->mode & MODE_INSERT);
         case 12: /* SRM -- Send/Receive */
@@ -1881,7 +2024,7 @@ csihandle(Term *t)
                 case 4: // modifyOtherKeys
                     lvl = csiescseq.arg[1];
                     if(lvl < 0 || lvl > 2) goto unknown;
-                    t->hooks->set_modify_other(t->hooks, lvl);
+                    t->modify_other = lvl;
                     break;
                 default:
                     goto unknown;
@@ -1896,7 +2039,7 @@ csihandle(Term *t)
                 case 4: // modifyOtherKeys
                     lvl = csiescseq.arg[1];
                     if(lvl < 0 || lvl > 2) goto unknown;
-                    lvl = t->hooks->get_modify_other(t->hooks);
+                    lvl = t->modify_other;
                     break;
                 default:
                     goto unknown;
@@ -2691,10 +2834,10 @@ eschandle(Term *t, uchar ascii)
         t->hooks->set_title(t->hooks, NULL);
         break;
     case '=': /* DECKPAM -- Application keypad */
-        t->hooks->set_mode(t->hooks, MODE_APPKEYPAD, 1);
+        t->appkeypad = true;
         break;
     case '>': /* DECKPNM -- Normal keypad */
-        t->hooks->set_mode(t->hooks, MODE_APPKEYPAD, 0);
+        t->appkeypad = false;
         break;
     case '7': /* DECSC -- Save Cursor */
         tcursor(t, CURSOR_SAVE);
@@ -3303,10 +3446,17 @@ tresize(Term *t, int col, int row)
     t->hooks->ttyresize(t->hooks, row, col);
 }
 
-void twindowmv(Term *t, int n){
-    if(!n) return;
-    LIMIT(n, -((int)t->scr->window_off), (int)(t->scr->len - t->row));
+// returns true if a mv occured
+bool twindowmv(Term *t, int n){
+    LIMIT(n,
+        // cannot make window_off go negative
+        -((int)t->scr->window_off),
+        // cannot make t->row + window_off exceed scr->len
+        (int)(t->scr->len - t->row - t->scr->window_off)
+    );
+    if(!n) return false;
     t->scr->window_off += n;
+    return true;
 }
 
 //////

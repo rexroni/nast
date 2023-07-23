@@ -7,6 +7,8 @@
 #include <cairo.h>
 #include <pango/pangocairo.h>
 
+#include "events.h"
+
 /* macros */
 #ifndef MIN
 #define MIN(a, b)        ((a) < (b) ? (a) : (b))
@@ -42,30 +44,6 @@ enum glyph_attribute {
     ATTR_WIDE       = 1 << 9,
     ATTR_WDUMMY     = 1 << 10,
     ATTR_NORENDER   = 1 << 11,
-};
-
-enum win_mode {
-    MODE_VISIBLE     = 1 << 0,
-    MODE_FOCUSED     = 1 << 1,
-    MODE_APPKEYPAD   = 1 << 2,
-    MODE_MOUSEBTN    = 1 << 3,
-    MODE_MOUSEMOTION = 1 << 4,
-    MODE_REVERSE     = 1 << 5,
-    MODE_KBDLOCK     = 1 << 6,
-    MODE_HIDE        = 1 << 7,
-    MODE_APPCURSOR   = 1 << 8,
-    MODE_MOUSESGR    = 1 << 9,
-    MODE_8BIT        = 1 << 10,
-    MODE_BLINK       = 1 << 11,
-    MODE_FBLINK      = 1 << 12,
-    MODE_FOCUS       = 1 << 13,
-    MODE_MOUSEX10    = 1 << 14,
-    MODE_MOUSEMANY   = 1 << 15,
-    MODE_NUMLOCK     = 1 << 16,
-    MODE_MOUSE       = MODE_MOUSEBTN
-                     | MODE_MOUSEMOTION
-                     | MODE_MOUSEX10
-                     | MODE_MOUSEMANY,
 };
 
 enum cursor_style {
@@ -146,12 +124,8 @@ struct THooks {
     void (*ttyhangup)(THooks*);
     void (*bell)(THooks*);
     void (*sendbreak)(THooks*);
-    void (*set_mode)(THooks*, enum win_mode, int);
-    int (*get_mode)(THooks*, enum win_mode);
     void (*set_title)(THooks*, const char *);
     void (*set_clipboard)(THooks*, char *buf, size_t len);
-    void (*set_modify_other)(THooks*, int lvl);
-    int (*get_modify_other)(THooks*);
 };
 
 typedef union {
@@ -163,15 +137,12 @@ typedef union {
 } Arg;
 
 void die(const char *, ...);
-void redraw(Term *t);
-void draw(Term *t);
 
 void printscreen(Term *t, const Arg *);
 void printsel(Term *t, const Arg *);
 void sendbreak(const Arg *);
 void toggleprinter(Term *t, const Arg *);
 
-int tattrset(Term *t, int);
 void tnew(
     Term **tout,
     int col,
@@ -183,10 +154,16 @@ void tnew(
 int trows(Term *t);
 int tsetfont(Term *t, char *font_name, int font_size);
 void tresize(Term *t, int, int);
-void twindowmv(Term *t, int n);
+// returns true if a mv occured
+bool twindowmv(Term *t, int n);
 void ttyhangup(pid_t);
 int ttynew(Term *t, pid_t *pid, char **cmd);
 size_t ttyread(Term *t);
+
+// returns true if the event should cause a rerender
+bool tkeyev(Term *t, key_ev_t ev);
+bool tmouseev(Term *t, mouse_ev_t ev);
+bool tfocusev(Term *t, bool focused);
 
 bool t_isset_crlf(Term *t);
 bool t_isset_echo(Term *t);
