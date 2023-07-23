@@ -1940,7 +1940,13 @@ csihandle(Term *t)
             tclearregion_term(t, 0, 0, t->col-1, t->row-1);
             break;
         case 3: /* xterm extension: clear screen and scrollback buffer */
-            tclearregion_abs(t, 0, 0, t->col-1, t->scr->len - 1);
+            tclearregion_term(t, 0, 0, t->col-1, t->row-1);
+            // delete from beginning of ring buffer
+            while(t->scr->len > t->row){
+                rline_free(&t->scr->rlines[t->scr->start]);
+                t->scr->start = rlines_idx(t->scr, 1);
+                t->scr->len--;
+            }
             break;
         default:
             goto unknown;

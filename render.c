@@ -610,8 +610,6 @@ int main(int argc, char *argv[]){
     // get keypresses from the window (does work)
     g_signal_connect(G_OBJECT(g.window), "key-press-event", G_CALLBACK(on_key_event), &g);
     g_signal_connect(G_OBJECT(g.window), "key-release-event", G_CALLBACK(on_key_event), &g);
-    g_signal_connect(G_OBJECT(g.window), "focus-in-event", G_CALLBACK(on_focus_in), &g);
-    g_signal_connect(G_OBJECT(g.window), "focus-out-event", G_CALLBACK(on_focus_out), &g);
 
     // mouse buttons
     // strangely, if I connect button press to the g.window I get duplicate events
@@ -623,6 +621,10 @@ int main(int argc, char *argv[]){
     // mouse scroll
     gtk_widget_add_events(g.darea, GDK_SCROLL_MASK);
     g_signal_connect(G_OBJECT(g.darea), "scroll-event", G_CALLBACK(on_scroll_event), &g);
+
+    // get focus events from the window
+    g_signal_connect(G_OBJECT(g.window), "focus-in-event", G_CALLBACK(on_focus_in), &g);
+    g_signal_connect(G_OBJECT(g.window), "focus-out-event", G_CALLBACK(on_focus_out), &g);
 
     gtk_window_set_position(GTK_WINDOW(g.window), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(g.window), 400, 400);
