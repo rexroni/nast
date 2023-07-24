@@ -3757,6 +3757,15 @@ void trender(
             tresize(t, col, row);
         }
     }
+    // draw the slice at the bottom
+    double ybot = t->grid_h * t->row;
+    if(ybot < h){
+        cairo_move_to(cr, 0, ybot);
+        struct rgb24 rgb = defaultbg;
+        cairo_set_source_rgb(cr, rgb.r / 255., rgb.g / 255., rgb.b / 255.);
+        cairo_rectangle(cr, 0, ybot, w, h - ybot);
+        cairo_fill(cr);
+    }
 
     // make a render context
     rctx_t rctx = {
