@@ -1095,6 +1095,9 @@ tswapscreen(Term *t)
 void
 tnewline(Term *t, int first_col, bool continue_line)
 {
+    t->c.state &= ~CURSOR_WRAPNEXT;
+    if(first_col) t->c.x = 0;
+
     uint64_t line_id;
     if(continue_line){
         line_id = get_cursor_rline(t)->line_id;
@@ -1102,25 +1105,48 @@ tnewline(Term *t, int first_col, bool continue_line)
         line_id = new_line_id(t->scr);
     }
 
-    // move the cursor down a line
-    t->c.y++;
-
-    // do we need a new line?
-    if(t->c.y == t->row){
-        t->c.y--;
-        scr_new_rline(t->scr, line_id, t->col);
-
-        // hold the window in place, if needed and possible
-        if(t->scr->window_off){
-            t->scr->window_off++;
-            LIMIT(t->scr->window_off, 0, t->scr->len - t->row);
+    /* if we are not in the scroll region, or if we not at the very bottom of
+       the scroll region, we just move downwards and call it a day */
+    if(t->c.y != t->bot){
+        // move down if we can
+        if(t->c.y + 1 < t->row){
+            t->c.y++;
+            get_cursor_rline(t)->line_id = line_id;
         }
+        return;
     }
 
-    tmoveto(t, first_col ? 0 : t->c.x, t->c.y);
+    // ok, we are at the bottom of the scroll region
 
-    // update the line_id
-    get_cursor_rline(t)->line_id = line_id;
+    /* if the scroll region does not include the top, we will drop scroll
+       history, which does not involve adding new lines */
+    if(t->top != 0){
+        tscrollup(t, t->top, t->bot, 1);
+        // we are now pointed at a freshly cleared line
+        get_cursor_rline(t)->line_id = line_id;
+        return;
+    }
+
+    // ok, we are at the bottom of a scroll region, which includes the top line
+
+    // add a new line to the bottom of the screen
+    scr_new_rline(t->scr, line_id, t->col);
+
+    // if scroll region doen't reach the bottom, rotate the new line into place
+    if(t->bot + 1 != t->row){
+        RLine *newrline = get_rline(t->scr, t->scr->len - 1);
+        size_t yabs = term2abs(t, t->c.y);
+        for(size_t i = t->scr->len - 1; i > yabs; i--){
+            set_rline(t->scr, i, get_rline(t->scr, i-1));
+        }
+        set_rline(t->scr, yabs, newrline);
+    }
+
+    // hold the window in place, if needed and possible
+    if(t->scr->window_off){
+        t->scr->window_off++;
+        LIMIT(t->scr->window_off, 0, t->scr->len - t->row);
+    }
 }
 
 // see https://vt100.net/docs/vt510-rm/chapter4.html, chapter 4.3.3
@@ -1356,6 +1382,7 @@ void mod_line_group(Term *t, size_t idx, int dir){
 }
 
 // scroll lines upwards in a specified window, cursor stays in place
+// caller should consider if it is appropriate to break line_id
 /*
    Example: t->row = 8, top = 1, bot = 6, n = 2
 
@@ -1397,15 +1424,14 @@ void tscrollup(Term *t, int top, int bot, int n){
             new_idx += n;
         }
         // the final slot is filled by the wiped line
-        set_rline(t->scr, old_idx, wiped);
+        set_rline(t->scr, term2abs(t, old_idx), wiped);
     }
     // step 3: modify the new top line group's line_id, moving downwards
     mod_line_group(t, term2abs(t, top), +1);
-    // scroll breaks line_ids
-    t->scr->new_line_id_on_write = true;
 }
 
 // scroll lines downwards in a specified window, cursor stays in place
+// scrolling downwards always breaks line ids
 /*
    Example: t->row = 8, top = 1, bot = 6, n = 2
 
@@ -1451,7 +1477,7 @@ void tscrolldown(Term *t, int top, int bot, int n){
     }
     // step 3: modify the new bottom line group's line_id, moving upwards
     mod_line_group(t, term2abs(t, bot + 1 - n), -1);
-    // scroll breaks line_ids
+    // scroll downwards breaks line_ids
     t->scr->new_line_id_on_write = true;
 }
 
@@ -1813,6 +1839,8 @@ int tgetmode(Term *t, int priv, int arg){
 void
 csihandle(Term *t)
 {
+    // fprintf(stderr, "csihandle(): ");
+    // csidump();
     char buf[40];
     int len;
     int lvl;
@@ -1970,6 +1998,8 @@ csihandle(Term *t)
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
         tscrollup(t, t->top, t->bot, csiescseq.arg[0]);
+        // scrolling up in this way breaks line id
+        t->scr->new_line_id_on_write = true;
         break;
     case 'T': /* SD -- Scroll <n> line down */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -2698,6 +2728,7 @@ tcontrolcode(Term *t, uchar ascii)
     case '\v':   /* VT */
     case '\n':   /* LF */
         /* go to first col if the mode is set */
+        // printf("temit(\\n)\n");
         tnewline(t, IS_SET(t, MODE_CRLF), false);
         return;
     case '\a':   /* BEL */
@@ -2983,13 +3014,28 @@ temit(Term *t, Rune u, int width)
 {
     Glyph g = t->c.attr;
     g.u = u;
+    // {
+    //     printf("temit(");
+    //     char buf[6];
+    //     size_t len = utf8encode(u, buf);
+    //     for(size_t i = 0; i < len; i++){
+    //         char c = buf[i];
+    //         if(c >= ' ' && c < 127){
+    //             printf("%c", c);
+    //         }else{
+    //             printf("\\x%.2x", c);
+    //         }
+    //     }
+    //     printf(")\n");
+    // }
 
     RLine *rline = get_cursor_rline(t);
 
     if(t->c.state & CURSOR_WRAPNEXT){
+        t->c.state &= ~CURSOR_WRAPNEXT;
         rline->glyphs[t->c.x].mode |= ATTR_WRAP;
         tnewline(t, 1, true);
-        // the rline has changed
+        // the rline has most likely changed
         rline = get_cursor_rline(t);
     }
 
@@ -3003,11 +3049,12 @@ temit(Term *t, Rune u, int width)
 
     // were we supposed to set the line id?
     if(t->scr->new_line_id_on_write){
+        t->scr->new_line_id_on_write = false;
         rline->line_id = new_line_id(t->scr);
     }
 
     if(t->c.x + width < t->col){
-        tmoveto(t, t->c.x + width, t->c.y);
+        t->c.x += width;
     }else{
         t->c.state |= CURSOR_WRAPNEXT;
     }
