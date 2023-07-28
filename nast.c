@@ -147,24 +147,6 @@ typedef struct {
 } TCursor;
 
 typedef struct {
-    int mode;
-    int type;
-    int snap;
-    /*
-     * Selection variables:
-     * nb – normalized coordinates of the beginning of the selection
-     * ne – normalized coordinates of the end of the selection
-     * ob – original coordinates of the beginning of the selection
-     * oe – original coordinates of the end of the selection
-     */
-    struct {
-        int x, y;
-    } nb, ne, ob, oe;
-
-    int alt;
-} Selection;
-
-typedef struct {
     RLine **rlines;
     // ring buffer semantics
     size_t cap;       // cap = item length of the physical buffer
@@ -325,7 +307,6 @@ static void tscrollregion(Term *t, int top, int bot);
 static ssize_t xwrite(int, const char *, size_t);
 
 /* Globals */
-static Selection sel;
 static CSIEscape csiescseq;
 static STREscape strescseq;
 static int iofd = 1;
@@ -810,14 +791,6 @@ bool tmouseev(Term *t, mouse_ev_t ev){
         // TODO: support alternateScroll mode and send scroll to application
         // for now, always scroll the view
         return twindowmv(t, ev.n);
-        int n = ev.n;
-        LIMIT(n,
-            -((int)t->scr->window_off),
-            (int)(t->scr->len - t->row - t->scr->window_off)
-        );
-        if(!n) return false;
-        t->scr->window_off += n;
-        return true;
     }
     return false;
 }
