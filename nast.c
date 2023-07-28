@@ -1308,10 +1308,17 @@ tclearregion_abs(Term *t, int x1, int y1, int x2, int y2)
             rline->glyphs[x] = (Glyph){
                 // default rune is ' ' so that cursor-on-empty-space works
                 .u = ' ',
-                .mode = ATTR_NORENDER,
                 .fg = t->c.attr.fg,
                 .bg = t->c.attr.bg,
             };
+        }
+        // check if we truncated the maxwritten
+        /* upper limit analysis:
+           if we delete to index 5, maxwritten must be at least 6 to matter:
+               idx: 0,1,2,3,4,5
+            delete: x x x x x 5 */
+        if(rline->maxwritten > x1 && rline->maxwritten <= x2){
+            rline->maxwritten = x1;
         }
     }
 }
@@ -1340,7 +1347,23 @@ tdeletechar(Term *t, int n)
     RLine *rline = get_rline(t->scr, term2abs(t, t->c.y));
 
     Glyph *glyphs = rline->glyphs;
+
+    // use memmove to overwrite the deleted characters
     memmove(&glyphs[dst], &glyphs[src], size * sizeof(*glyphs));
+
+    // shorten maxwritten if necessary
+    if(rline->maxwritten > t->c.x){
+        if(rline->maxwritten > t->c.x + n){
+            rline->maxwritten -= n;
+        }else{
+            rline->maxwritten = t->c.x;
+        }
+    }
+
+    // use tclearregion to reset the end of the line
+    /* note that tclearregion could be used to affect maxwritten if the calling
+       order were different, but it wouldn't account for the memmove behavior
+       correctly */
     tclearregion_term(t, t->col-n, t->c.y, t->col-1, t->c.y);
 }
 
@@ -3014,20 +3037,6 @@ temit(Term *t, Rune u, int width)
 {
     Glyph g = t->c.attr;
     g.u = u;
-    // {
-    //     printf("temit(");
-    //     char buf[6];
-    //     size_t len = utf8encode(u, buf);
-    //     for(size_t i = 0; i < len; i++){
-    //         char c = buf[i];
-    //         if(c >= ' ' && c < 127){
-    //             printf("%c", c);
-    //         }else{
-    //             printf("\\x%.2x", c);
-    //         }
-    //     }
-    //     printf(")\n");
-    // }
 
     RLine *rline = get_cursor_rline(t);
 
@@ -3046,6 +3055,22 @@ temit(Term *t, Rune u, int width)
     }else{
         rline_set_glyph(rline, t->c.x, g);
     }
+
+    // {
+    //     printf("temit(");
+    //     char buf[6];
+    //     size_t len = utf8encode(u, buf);
+    //     for(size_t i = 0; i < len; i++){
+    //         char c = buf[i];
+    //         if(c >= ' ' && c < 127){
+    //             printf("%c", c);
+    //         }else{
+    //             printf("\\x%.2x", c);
+    //         }
+    //     }
+    //     printf("), maxwritten=%zu\n", rline->maxwritten);
+    // }
+
 
     // were we supposed to set the line id?
     if(t->scr->new_line_id_on_write){
@@ -3067,6 +3092,7 @@ Read a stream of utf-8, and call tputc on each codepoint.
 int
 twrite(Term *t, const char *buf, int buflen, int show_ctrl)
 {
+    // printf("twrite("); dumpstr(stdout, buf, buflen); printf(")\n");
     int charsize;
     Rune u;
     int n;
@@ -3272,13 +3298,13 @@ static Screen reflow(
     //     for(size_t i = 0; i < old.len; i++){
     //         // get the next old rline
     //         size_t idx = (old.start + i) % (old.cap + 1);
-    //         RLine *old = old.rlines[idx];
+    //         RLine *r = old.rlines[idx];
     //         char utf8[4096];
     //         size_t utf8_len = 0;
-    //         for(size_t j = 0; j < old->n_glyphs; j++){
-    //             utf8_len += utf8encode(old->glyphs[j].u, &utf8[utf8_len]);
+    //         for(size_t j = 0; j < r->n_glyphs; j++){
+    //             utf8_len += utf8encode(r->glyphs[j].u, &utf8[utf8_len]);
     //         }
-    //         printf("id=%.3lu: %.*s\n", old->line_id, (int)utf8_len, utf8);
+    //         printf("id=%.3lu: %.*s\n", r->line_id, (int)utf8_len, utf8);
     //     }
     //     printf("ENDPRECOPY\n");
     // }
@@ -3307,11 +3333,9 @@ static Screen reflow(
             old_line_id = o->line_id;
         }
         // copy all of the contents of this rline to the new rline
-        for(size_t j = 0; j < o->n_glyphs; j++){
+        for(size_t j = 0; j < o->maxwritten; j++){
             // TODO: handle wide glpyhs
             Glyph g = o->glyphs[j];
-            // ignore glyphs that need no copying
-            if(g.mode & ATTR_NORENDER) continue;
             // do we need a new rline?
             if(glyph_idx >= col){
                 if(new.len == new.cap){
@@ -3327,7 +3351,8 @@ static Screen reflow(
             }
             // actually copy a glyph into the new line
             n->glyphs[glyph_idx] = g;
-            // printf("%c (%lu)\n", (char)g.u, new->line_id);
+            n->maxwritten++;
+            // printf("%c (%lu)\n", (char)g.u, n->line_id);
             // cursor reflow: cursor-over-copyable-glyph case
             for(size_t i = 0; i < ncrs; i++){
                 cursor_reflow_copyable_glyph(
@@ -3550,7 +3575,7 @@ RLine *rline_new(size_t n_glyphs, uint64_t line_id){
     *rline = (RLine){.glyphs=glyphs, .n_glyphs=n_glyphs, .line_id=line_id};
     for(size_t i = 0; i < rline->n_glyphs; i++){
         // default rune is ' ' so that cursor-on-empty-space works
-        rline->glyphs[i] = (Glyph){ .u = ' ', .mode = ATTR_NORENDER };
+        rline->glyphs[i] = (Glyph){ .u = ' ' };
     }
     return rline;
 }
@@ -3561,8 +3586,9 @@ void rline_clear(RLine *rline){
     // set glyphs back to ' '
     for(size_t i = 0; i < rline->n_glyphs; i++){
         // default rune is ' ' so that cursor-on-empty-space works
-        rline->glyphs[i] = (Glyph){ .u = ' ', .mode = ATTR_NORENDER };
+        rline->glyphs[i] = (Glyph){ .u = ' ' };
     }
+    rline->maxwritten = 0;
 }
 
 // create a new rline in the ring buffer, discarding the oldest one as needed.
@@ -3613,8 +3639,6 @@ static Glyph calc_fmt(fmt_overrides_t ovr, Glyph g, size_t x){
         // white fg, bright red bg
         g.fg = rgb24_from_index(7);
         g.bg = rgb24_from_index(9);
-        // disable NORENDER
-        g.mode &= ~ATTR_NORENDER;
     }
     return g;
 }
@@ -3639,10 +3663,6 @@ double rline_subrender(
     // fmt is provided separately, since it may be overridden
     Glyph fmt
 ){
-    // skip NORENDER chunks
-    if(fmt.mode & ATTR_NORENDER){
-        return x + rctx.grid_w * (end - start);
-    }
     // expand glyphs back into utf8 for pango
     // TODO: support arbitrary-length lines
     char utf8[4096];
@@ -3702,7 +3722,12 @@ void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
     Glyph fmt = calc_fmt(ovr, rline->glyphs[0], 0);
     size_t start = 0;
     size_t i;
-    for(i = 1; i < rline->n_glyphs; i++){
+    // render to end of line, or cursor, whichever is greater
+    size_t maxrender = rline->maxwritten;
+    if(ovr.cursor > -1 && (size_t)ovr.cursor+1 > rline->maxwritten){
+        maxrender = (size_t)ovr.cursor+1;
+    }
+    for(i = 1; i < maxrender; i++){
         Glyph next_fmt = calc_fmt(ovr, rline->glyphs[i], i);
         if(!format_eq(fmt, next_fmt)){
             // found a different format, i-1 was the end of the render box
@@ -3713,7 +3738,7 @@ void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
         }
     }
     // render the final chunk
-    rline_subrender(rline, rctx, cr, layout, x, start, rline->n_glyphs, fmt);
+    rline_subrender(rline, rctx, cr, layout, x, start, maxrender, fmt);
     g_object_unref(layout);
     cairo_destroy(cr);
 }
@@ -3751,6 +3776,13 @@ void rline_insert_glyph(RLine *rline, size_t idx, Glyph g){
 
     rline->glyphs[idx] = g;
 
+    // adjust maxwritten
+    if(rline->maxwritten < idx + 1){
+        rline->maxwritten = idx + 1;
+    }else{
+        rline->maxwritten++;
+    }
+
     // mark this line as dirty
     rline_unrender(rline);
 }
@@ -3758,6 +3790,10 @@ void rline_insert_glyph(RLine *rline, size_t idx, Glyph g){
 // set a glyph to be something else
 void rline_set_glyph(RLine *rline, size_t idx, Glyph g){
     rline->glyphs[idx] = g;
+
+    if(rline->maxwritten < idx + 1){
+        rline->maxwritten = idx + 1;
+    }
 
     // mark this line as dirty
     rline_unrender(rline);

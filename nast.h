@@ -43,7 +43,6 @@ enum glyph_attribute {
     ATTR_WRAP       = 1 << 8,
     ATTR_WIDE       = 1 << 9,
     ATTR_WDUMMY     = 1 << 10,
-    ATTR_NORENDER   = 1 << 11,
 };
 
 enum cursor_style {
@@ -110,6 +109,8 @@ typedef struct {
     size_t n_glyphs;
     // consecutive physical lines of matching line_id form a logical line.
     uint64_t line_id;
+    // gline length is based on furthest nondefault char
+    uint64_t maxwritten;
 } RLine;
 
 struct THooks;

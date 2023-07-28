@@ -586,7 +586,7 @@ int main(int argc, char *argv[]){
             .set_clipboard = set_clipboard,
         },
         .font_name = "monospace",
-        .font_size = 10,
+        .font_size = 20,
     };
     G = &g;
 
