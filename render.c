@@ -192,6 +192,21 @@ static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
     return FALSE;
 }
 
+// paste_cb is a GtkClipboardTextReceivedFunc
+static void paste_cb(
+    GtkClipboard *clipboard, const char *text, gpointer user_data
+){
+    globals_t *g = user_data;
+    if(!text){
+        // there's no text to paste
+        return;
+    }
+    bool bracketpaste = t_isset_bracketpaste(g->term);
+    if(bracketpaste) ttywrite(g, "\x1b[200~", 6, 0);
+    ttywrite(g, text, strlen(text), 0);
+    if(bracketpaste) ttywrite(g, "\x1b[201~", 6, 0);
+}
+
 // developer.gnome.org/gtk3/3.24/GtkWidget.html#GtkWidget-key-press-event
 static gboolean on_key_event(
     GtkWidget *widget, GdkEventKey *event_key, gpointer user_data
@@ -316,6 +331,16 @@ static gboolean on_key_event(
                       | (SHIFT_MASK * !!(state & GDK_SHIFT_MASK))
                       | (ALT_MASK * !!(state & GDK_MOD1_MASK))
                       | (META_MASK * !!(state & GDK_META_MASK));
+
+    // intercept paste keybindings, which is on us
+    if(key == NAST_KEY_INSERT && mods == SHIFT_MASK){
+        gtk_clipboard_request_text(g->primary, paste_cb, g);
+        return FALSE;
+    }
+    if(key == 'V' && mods == (CTRL_MASK | SHIFT_MASK)){
+        gtk_clipboard_request_text(g->clipboard, paste_cb, g);
+        return FALSE;
+    }
 
     key_ev_t ev = { key, mods };
     int redraw = tkeyev(g->term, ev);

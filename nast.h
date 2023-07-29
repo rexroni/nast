@@ -127,9 +127,9 @@ struct THooks {
     void (*sendbreak)(THooks*);
     void (*set_title)(THooks*, const char *);
     // buf is allocated and owned by THooks implementer
-    // which=0 -> primary
-    // which=1 -> clipboard
-    void (*set_clipboard)(THooks*, char *buf, size_t len, int which);
+    // clipboard=0 -> primary
+    // clipboard=1 -> clipboard
+    void (*set_clipboard)(THooks*, char *buf, size_t len, int clipboard);
 };
 
 typedef union {
@@ -170,6 +170,13 @@ size_t ttyread(Term *t);
 bool tkeyev(Term *t, key_ev_t ev);
 bool tmouseev(Term *t, mouse_ev_t ev);
 bool tfocusev(Term *t, bool focused);
+
+/* in bracket paste mode, the renderer should wrap pasted content in:
+
+        \x1b[200~ ... \x1b[201~
+
+   [1] https://cirw.in/blog/bracketed-paste */
+bool t_isset_bracketpaste(Term *t);
 
 bool t_isset_crlf(Term *t);
 bool t_isset_echo(Term *t);

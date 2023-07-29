@@ -88,10 +88,6 @@ enum term_mode {
     MODE_PRINT       = 1 << 5,
     MODE_UTF8        = 1 << 6,
     MODE_SIXEL       = 1 << 7,
-    /* This used to be associated with the window rather than with the terminal
-       but I don't fully understand why.  I think that copy/paste mechanics
-       basically be a detail of the interface between libnast and the backend
-       (see architecture diagram in README) and not a window mode. */
     MODE_BRCKTPASTE  = 1 << 8,
 
     // right now, none of these are actually honored
@@ -817,9 +813,6 @@ tkeyev(Term *t, key_ev_t ev)
             twindowmv(t, -t->row + 1);
             return true;
 
-        case KEY_ACTION_SHIFT_INSERT:
-            die("shift+insert");
-
         case KEY_ACTION_COPY:
             texportselection(t, 1);
             return false;
@@ -1076,6 +1069,12 @@ tfocusev(Term *t, bool focused)
         t->hooks->ttywrite(t->hooks, "\x1b[O", 3);
     }
     return false;
+}
+
+bool
+t_isset_bracketpaste(Term *t)
+{
+    return IS_SET(t, MODE_BRCKTPASTE);
 }
 
 bool

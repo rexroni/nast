@@ -8,8 +8,9 @@ typedef enum {
     KEY_ACTION_MODS,
     KEY_ACTION_SHIFT_PGUP,
     KEY_ACTION_SHIFT_PGDN,
-    KEY_ACTION_SHIFT_INSERT,
     KEY_ACTION_COPY,
+    /* paste-related actions aren't't here, because the renderer should just
+       intercept it and write it to the tty (see: t_isset_bracketpaste()) */
 } key_action_type_e;
 
 typedef union {
