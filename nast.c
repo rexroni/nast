@@ -814,10 +814,13 @@ tkeyev(Term *t, key_ev_t ev)
             if((map[0].mask & ALTIFY) && (ALT_MASK & mods)){
                 Rune r = text[0];
                 len = utf8encode(r + 128, buf);
+                t->scr->window_off = 0;
                 t->hooks->ttywrite(t->hooks, buf, len);
             }else{
+                t->scr->window_off = 0;
                 t->hooks->ttywrite(t->hooks, text, len);
             }
+            return true;
         } break;
 
         case KEY_ACTION_MODS: {
@@ -831,8 +834,10 @@ tkeyev(Term *t, key_ev_t ev)
             if(ilen < 1){
                 fprintf(stderr, "failed to sprintf(%s, %d)\n", fmt, mod_idx);
             }else{
+                t->scr->window_off = 0;
                 t->hooks->ttywrite(t->hooks, buf, (size_t)ilen);
             }
+            return true;
         } break;
 
         case KEY_ACTION_SHIFT_PGUP:
@@ -2277,6 +2282,11 @@ csihandle(Term *t)
                 rline_free(&t->scr->rlines[t->scr->start]);
                 t->scr->start = rlines_idx(t->scr, 1);
                 t->scr->len--;
+                // reset scroll and selection
+                t->scr->window_off = 0;
+                t->sel_type = 0;
+                t->last_press_x = 0;
+                t->last_press_x = 0;
             }
             break;
         default:
