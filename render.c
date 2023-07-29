@@ -12,8 +12,6 @@
 
 #include "keymap.h"
 
-#include "config.h"
-
 typedef struct {
     // hooks pointer, must be the first element
     THooks hooks;
@@ -700,7 +698,6 @@ int main(int argc, char *argv[]){
 
     char **cmd = argc > 1 ? argv+1 : NULL;
     g.ttyfd = ttynew(g.term, &g.pid, cmd);
-    (void)shell;
     // g.ttyfd = ttynew(g.term, &g.pid, NULL, NULL, NULL, NULL);
     signal(SIGCHLD, sigchld);
 

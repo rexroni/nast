@@ -24,6 +24,12 @@
 
 #include "xtgettcap.h"
 
+// things which used to live in config.h
+char *termname = "xterm-256color";
+struct rgb24 defaultfg = {255,255,255};
+struct rgb24 defaultbg = {0, 0, 0};
+unsigned int tabspaces = 8;
+
 /* vtiden: identification sequence returned in DA and DECID
    see https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
    search for "Send Device Attributes"
