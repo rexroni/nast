@@ -192,6 +192,8 @@ struct Term {
     size_t sel_yb;
     size_t sel_xe;
     size_t sel_ye;
+    // does the selection end with an EOL
+    bool sel_eol;
     int sel_type; // 0=none, 1=click, 2=doubleclick, 3=tripleclick
 
     // focus mode
@@ -298,7 +300,7 @@ static void tnewline(Term *t, int, bool);
 static void tputtab(Term *t, int);
 static void tputc(Term *t, Rune);
 static void treset(Term *t);
-static RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols);
+static RLine *scr_new_rline(Screen*, Term*, uint64_t line_id, size_t cols);
 static void tscrollup(Term *t, int, int, int, bool);
 static void tscrolldown(Term *t, int, int, int, bool);
 static void tsetattr(Term *t, int *, int);
@@ -718,6 +720,26 @@ ttyread(Term *t)
     return ret;
 }
 
+// returns if line y is the end of a line group
+static bool
+tgroupend(Term *t, size_t y)
+{
+    return y + 1 >= t->scr->len
+        || get_rline(t->scr, y)->line_id != get_rline(t->scr, y+1)->line_id;
+}
+
+/* returns the index of the first trailing space of the rline, or
+   rline->nglyphs if there are no trailing spaces */
+static size_t
+ttailspace(Term *t, size_t y)
+{
+    RLine *rline = get_rline(t->scr, y);
+    for(size_t i = rline->maxwritten; i > 0; i--){
+        if(rline->glyphs[i-1].u != ' ')  return i;
+    }
+    return 0;
+}
+
 static void
 texportselection(Term *t, int clipboard)
 {
@@ -739,13 +761,15 @@ texportselection(Term *t, int clipboard)
             line_id = rline->line_id;
         }
         // copy each rune
-        size_t xlimit = rline->maxwritten;
-        if(y == t->sel_ye) xlimit = t->sel_xe + 1;
+        size_t xlimit = ttailspace(t, y);
+        if(y == t->sel_ye && xlimit > t->sel_xe) xlimit = t->sel_xe + 1;
         for(; x < xlimit; x++){
             len += utf8encode(rline->glyphs[x].u, buf + len);
         }
         x = 0;
     }
+    // detect EOL selection
+    if(t->sel_eol) buf[len++] = '\n';
     t->hooks->set_clipboard(t->hooks, buf, len, clipboard);
 }
 
@@ -962,6 +986,7 @@ snap_line(Term *t, size_t *x, size_t *y, int dir)
 static void
 tselect(Term *t, size_t xb, size_t yb, size_t xe, size_t ye, int type)
 {
+    bool eol = false;
     sort_xy(&xb, &yb, &xe, &ye);
     switch(type){
         case 0:
@@ -979,12 +1004,23 @@ tselect(Term *t, size_t xb, size_t yb, size_t xe, size_t ye, int type)
             // snap to lines
             snap_line(t, &xb, &yb, -1);
             snap_line(t, &xe, &ye, +1);
+            eol = true;
             break;
     }
+
+    // eol highlight detection
+    size_t tailspaceb = ttailspace(t, yb);
+    if(tgroupend(t, yb) && xb >= tailspaceb){
+        // selection begins in the EOL space
+        xb = tailspaceb;
+    }
+    if(tgroupend(t, ye) && xe >= ttailspace(t, ye)) eol = true;
+
     t->sel_xb = xb;
     t->sel_yb = yb;
     t->sel_xe = xe;
     t->sel_ye = ye;
+    t->sel_eol = eol;
     t->sel_type = type;
 }
 
@@ -1342,6 +1378,8 @@ tswapscreen(Term *t)
         t->scr = &t->alt;
     }
     t->mode ^= MODE_ALTSCREEN;
+    // break selection
+    t->sel_type = 0;
 }
 
 void
@@ -1382,7 +1420,7 @@ tnewline(Term *t, int first_col, bool break_line_id)
     // ok, we are at the bottom of a scroll region, which includes the top line
 
     // add a new line to the bottom of the screen
-    scr_new_rline(t->scr, line_id, t->col);
+    scr_new_rline(t->scr, t, line_id, t->col);
 
     // if scroll region doen't reach the bottom, rotate the new line into place
     if(t->bot + 1 != t->row){
@@ -3567,7 +3605,7 @@ static Screen reflow(
                     cursor_reflow_decrement_y(crs[i]);
                 }
             }
-            n = scr_new_rline(&new, new_line_id(&new), col);
+            n = scr_new_rline(&new, NULL, new_line_id(&new), col);
             // printf("\\n\n");
             glyph_idx = 0;
             old_line_id = o->line_id;
@@ -3585,7 +3623,7 @@ static Screen reflow(
                     }
                 }
                 // use the same line_id as the last one
-                n = scr_new_rline(&new, n->line_id, col);
+                n = scr_new_rline(&new, NULL, n->line_id, col);
                 // printf("\\n\n");
                 glyph_idx = 0;
             }
@@ -3635,7 +3673,7 @@ static Screen reflow(
 
     // make sure we have at least enough rlines to fill the screen
     while(new.len < row){
-        scr_new_rline(&new, 0, col);
+        scr_new_rline(&new, NULL, 0, col);
     }
 
     return new;
@@ -3651,6 +3689,10 @@ tresize(Term *t, int col, int row)
 
     int *bp;
     int old_col = t->col;
+
+    // TODO: reflow selection, don't break it
+    t->sel_type = 0;
+    t->pressed = false;
 
     tunrender(t);
 
@@ -3831,8 +3873,18 @@ void rline_clear(RLine *rline){
     rline->maxwritten = 0;
 }
 
+static void
+decr_y_with_x(size_t *y, size_t *x)
+{
+    if(*y == 0){
+        *x = 0;
+    }else{
+        (*y)--;
+    }
+}
+
 // create a new rline in the ring buffer, discarding the oldest one as needed.
-RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols){
+RLine *scr_new_rline(Screen *scr, Term *t, uint64_t line_id, size_t cols){
     // is ring buffer full?
     if(scr->len == scr->cap){
         // free oldest rline
@@ -3840,6 +3892,15 @@ RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols){
         // forget the oldest history element (start of the ring buffer)
         scr->start = rlines_idx(scr, 1);
         scr->len--;
+        if(t){
+            // update all stored absoulte y coordinates
+            decr_y_with_x(&t->last_press_y, &t->last_press_x);
+            decr_y_with_x(&t->sel_yb, &t->sel_xb);
+            // if sel_ye would go negative, drop the whole selection
+            size_t canary = 1;
+            decr_y_with_x(&t->sel_ye, &canary);
+            if(!canary) t->sel_type = 0;
+        }
     }
     // extend the buffer
     RLine *out = rline_new(cols, line_id);
@@ -3863,11 +3924,11 @@ static fmt_overrides_t t_get_fmt_override(Term *t, int y_abs){
         }else{
             sel_first = 0;
         }
-        if(y_abs == t->sel_ye){
-            // this is the last line of selection
-            sel_last = t->sel_xe;
-        }else{
+        if(y_abs < t->sel_ye || t->sel_eol){
             sel_last = INT_MAX;
+        }else{
+            // final line of selection, and EOL is not selected
+            sel_last = t->sel_xe;
         }
     }
     return (fmt_overrides_t){cursor, sel_first, sel_last};
@@ -3973,12 +4034,7 @@ void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
     Glyph fmt = calc_fmt(ovr, rline->glyphs[0], 0);
     size_t start = 0;
     size_t i;
-    // render to end of line, or cursor, whichever is greater
-    size_t maxrender = rline->maxwritten;
-    if(ovr.cursor > -1 && (size_t)ovr.cursor+1 > rline->maxwritten){
-        maxrender = (size_t)ovr.cursor+1;
-    }
-    for(i = 1; i < maxrender; i++){
+    for(i = 1; i < rline->n_glyphs; i++){
         Glyph next_fmt = calc_fmt(ovr, rline->glyphs[i], i);
         if(!format_eq(fmt, next_fmt)){
             // found a different format, i-1 was the end of the render box
@@ -3989,7 +4045,7 @@ void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
         }
     }
     // render the final chunk
-    rline_subrender(rline, rctx, cr, layout, x, start, maxrender, fmt);
+    rline_subrender(rline, rctx, cr, layout, x, start, rline->n_glyphs, fmt);
     g_object_unref(layout);
     cairo_destroy(cr);
 }
