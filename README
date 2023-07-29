@@ -1,12 +1,20 @@
 nast - not-as-simple terminal
---------------------
+-----------------------------
 nast is a fork of the suckless simple terminal.  libnast is a library designed
 to provide terminal emulator behavior to arbitrary applications with a
 well-defined interface.
 
+Cool Features
+-------------
+- reflows lines on window or font change
+- ctrl+scroll to zoom
+- ctrl+shift+c for copy and ctrl+shift+v for paste
+- masquerades as xterm, so your terminal works after ssh
+
 Project Status
 --------------
-nast and libnast are currently in early development
+- nast is a barely-usable terminal.
+- libnast should be a usable library but only has one consumer.
 
 System Architecture
 -------------------
