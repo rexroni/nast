@@ -722,6 +722,37 @@ ttyread(Term *t)
     return ret;
 }
 
+static void
+texportselection(Term *t, int clipboard)
+{
+    if(!t->sel_type) return;
+
+    // allocate a big enough buffer for all utf8 characters plus newlines
+    char *buf = xmalloc(UTF_SIZ * (t->col + 1) * (t->sel_ye - t->sel_yb + 1));
+    size_t len = 0;
+    // decode all runes into bytes
+    size_t y = t->sel_yb;
+    size_t x = t->sel_xb;
+    RLine *rline = get_rline(t->scr, t->sel_yb);
+    size_t line_id = rline->line_id;
+    for(; y <= t->sel_ye; y++){
+        rline = get_rline(t->scr, y);
+        // detect line transitions
+        if(line_id != rline->line_id){
+            buf[len++] = '\n';
+            line_id = rline->line_id;
+        }
+        // copy each rune
+        size_t xlimit = rline->maxwritten;
+        if(y == t->sel_ye) xlimit = t->sel_xe + 1;
+        for(; x < xlimit; x++){
+            len += utf8encode(rline->glyphs[x].u, buf + len);
+        }
+        x = 0;
+    }
+    t->hooks->set_clipboard(t->hooks, buf, len, clipboard);
+}
+
 // returns true if the event should cause a rerender
 bool
 tkeyev(Term *t, key_ev_t ev)
@@ -788,6 +819,10 @@ tkeyev(Term *t, key_ev_t ev)
 
         case KEY_ACTION_SHIFT_INSERT:
             die("shift+insert");
+
+        case KEY_ACTION_COPY:
+            texportselection(t, 1);
+            return false;
     }
     return false;
 }
@@ -831,7 +866,7 @@ sort_xy(size_t *x1, size_t *y1, size_t *x2, size_t *y2)
 
 // returns bool ok
 static bool
-snap_peek(
+snap_word_peek(
     Term *t,
     size_t x,
     size_t y,
@@ -898,7 +933,7 @@ snap_word(Term *t, size_t *x, size_t *y, int dir)
     Glyph g = {0};
     size_t line_id = get_rline(t->scr, *y)->line_id;
     while(true){
-        bool ok = snap_peek(t, *x, *y, line_id, dir, &tx, &ty, &g);
+        bool ok = snap_word_peek(t, *x, *y, line_id, dir, &tx, &ty, &g);
         if(!ok) return;
         /* always include WDUMMY during snapping (it will never be part of the
            selection buffer */
@@ -909,6 +944,25 @@ snap_word(Term *t, size_t *x, size_t *y, int dir)
         }
         // otherwise this is the end of our search
         return;
+    }
+}
+
+static void
+snap_line(Term *t, size_t *x, size_t *y, int dir)
+{
+    size_t line_id = get_rline(t->scr, *y)->line_id;
+    // find the dir-wise limit for this line_id
+    while(*y > 0 && *y + 1 < t->scr->len){
+        size_t ty = *y + dir;
+        if(get_rline(t->scr, ty)->line_id != line_id) break;
+        *y = ty;
+    }
+    if(dir < 0){
+        // going up, x goes to start of line
+        *x = 0;
+    }else{
+        // going down, x goes to end of line
+        *x = get_rline(t->scr, *y)->maxwritten - 1;
     }
 }
 
@@ -930,8 +984,8 @@ tselect(Term *t, size_t xb, size_t yb, size_t xe, size_t ye, int type)
             break;
         case 3:
             // snap to lines
-            xb = 0;
-            xe = get_rline(t->scr, ye)->maxwritten;
+            snap_line(t, &xb, &yb, -1);
+            snap_line(t, &xe, &ye, +1);
             break;
     }
     t->sel_xb = xb;
@@ -979,6 +1033,7 @@ tmouseev(Term *t, mouse_ev_t ev)
                 case 3:
                     // start a new selection staring and ending here
                     tselect(t, x, y, x, y, type);
+                    texportselection(t, 0);
                     return true;
             }
         }
@@ -987,6 +1042,7 @@ tmouseev(Term *t, mouse_ev_t ev)
             tselect(
                 t, t->last_press_x, t->last_press_y, x, y, t->last_press_type
             );
+            texportselection(t, 0);
             return true;
         }
         // no other press types matter
@@ -994,6 +1050,7 @@ tmouseev(Term *t, mouse_ev_t ev)
     }
     if(ev.type == MOUSE_EV_RELEASE){
         t->pressed = false;
+        texportselection(t, 0);
         return false;
     }
     if(ev.type == MOUSE_EV_MOTION){
@@ -2669,7 +2726,7 @@ strhandle(Term *t)
                 size_t len;
                 buf = base64dec(strescseq.args[2], &len);
                 if (buf) {
-                    t->hooks->set_clipboard(t->hooks, buf, len);
+                    die("OSC set clipboard command\n");
                 } else {
                     fprintf(stderr, "erresc: invalid base64\n");
                 }

@@ -32,6 +32,8 @@ typedef struct {
     GtkWidget *window;
     GtkWidget *darea;
     GIOChannel *wr_ttychan;
+    GtkClipboard *primary;
+    GtkClipboard *clipboard;
 } globals_t;
 
 // sigchld needs to know the globals I guess?
@@ -82,11 +84,10 @@ void set_title(THooks *thooks, const char *title){
     // we will always just ignore this and leave ourselves called "nast"
 }
 
-void set_clipboard(THooks *thooks, char *buf, size_t len){
-    (void)thooks;
+void set_clipboard(THooks *thooks, char *buf, size_t len, int clipboard){
+    globals_t *g = (globals_t*)thooks;
+    gtk_clipboard_set_text(clipboard ? g->clipboard : g->primary, buf, len);
     free(buf);
-    (void)len;
-    die("set_clipboard() not handled\n");
 }
 
 void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
@@ -616,6 +617,10 @@ int main(int argc, char *argv[]){
     gtk_init(&argc, &argv);
 
     g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+
+    // get both clipboards
+    g.primary = gtk_clipboard_get(gdk_atom_intern("PRIMARY", true));
+    g.clipboard = gtk_clipboard_get(gdk_atom_intern("CLIPBOARD", true));
 
     g.darea = gtk_drawing_area_new();
     gtk_container_add(GTK_CONTAINER(g.window), g.darea);

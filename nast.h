@@ -126,7 +126,10 @@ struct THooks {
     void (*bell)(THooks*);
     void (*sendbreak)(THooks*);
     void (*set_title)(THooks*, const char *);
-    void (*set_clipboard)(THooks*, char *buf, size_t len);
+    // buf is allocated and owned by THooks implementer
+    // which=0 -> primary
+    // which=1 -> clipboard
+    void (*set_clipboard)(THooks*, char *buf, size_t len, int which);
 };
 
 typedef union {

@@ -123,7 +123,7 @@ key_map_t *keymap[] = {
     X({ALTIFY | MOK2, M("\x1b[27;%d;64~")}, {CTRL_, K("\x00")}, {0, K("@")}), // 0x40 @
     X({ALTIFY | MOK2, M("\x1b[27;%d;65~")}, {CTRL_, K("\x01")}, {0, K("A")}), // 0x41 A
     X({ALTIFY | MOK2, M("\x1b[27;%d;66~")}, {CTRL_, K("\x02")}, {0, K("B")}), // 0x42 B
-    X({ALTIFY | MOK2, M("\x1b[27;%d;67~")}, {CTRL_, K("\x03")}, {0, K("C")}), // 0x43 C
+    X({ALTIFY | MOK2, M("\x1b[27;%d;67~")}, {CTRL_, F(COPY)}, {CTRL_, K("\x03")}, {0, K("C")}), // 0x43 C
     X({ALTIFY | MOK2, M("\x1b[27;%d;68~")}, {CTRL_, K("\x04")}, {0, K("D")}), // 0x44 D
     X({ALTIFY | MOK2, M("\x1b[27;%d;69~")}, {CTRL_, K("\x05")}, {0, K("E")}), // 0x45 E
     X({ALTIFY | MOK2, M("\x1b[27;%d;70~")}, {CTRL_, K("\x06")}, {0, K("F")}), // 0x46 F
