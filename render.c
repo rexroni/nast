@@ -384,6 +384,29 @@ static gboolean on_button_event(
     return FALSE;
 }
 
+// https://docs.gtk.org/gtk3/signal.Widget.motion-notify-event.html
+// https://docs.gtk.org/gdk3/struct.EventMotion.html
+static gboolean on_motion_event(
+    GtkWidget* widget, GdkEventMotion *event, gpointer user_data
+){
+    globals_t *g = user_data;
+    mouse_ev_t ev = {
+        .type = MOUSE_EV_MOTION,
+        .mods = (CTRL_MASK * !!(event->state & GDK_CONTROL_MASK))
+              | (SHIFT_MASK * !!(event->state & GDK_SHIFT_MASK))
+              | (ALT_MASK * !!(event->state & GDK_MOD1_MASK))
+              | (META_MASK * !!(event->state & GDK_META_MASK)),
+        .ms = event->time,
+        .n = 0,
+        .x = (int)event->x,
+        .y = (int)event->y,
+        .pix_coords = true,
+    };
+    bool redraw = tmouseev(g->term, ev);
+    if(redraw) gtk_widget_queue_draw(g->darea);
+    return FALSE;
+}
+
 // https://docs.gtk.org/gtk3/signal.Widget.scroll-event.html
 // https://docs.gtk.org/gdk3/struct.EventScroll.html
 static gboolean on_scroll_event(
@@ -618,6 +641,10 @@ int main(int argc, char *argv[]){
     g_signal_connect(G_OBJECT(g.darea), "button-press-event", G_CALLBACK(on_button_event), &g);
     g_signal_connect(G_OBJECT(g.darea), "button-release-event", G_CALLBACK(on_button_event), &g);
 
+    // mouse motion
+    gtk_widget_add_events(g.darea, GDK_POINTER_MOTION_MASK);
+    g_signal_connect(G_OBJECT(g.darea), "motion-notify-event", G_CALLBACK(on_motion_event), &g);
+
     // mouse scroll
     gtk_widget_add_events(g.darea, GDK_SCROLL_MASK);
     g_signal_connect(G_OBJECT(g.darea), "scroll-event", G_CALLBACK(on_scroll_event), &g);
@@ -633,7 +660,8 @@ int main(int argc, char *argv[]){
     gtk_widget_show_all(g.window);
 
     // create the terminal
-    tnew(&g.term, 80, 40, g.font_name, g.font_size, (THooks*)&g);
+    char *delims = " `-=~!@#$%^&*()_+[]\\{}|;':\",./<>?";
+    tnew(&g.term, 80, 40, g.font_name, g.font_size, delims, (THooks*)&g);
 
     char **cmd = argc > 1 ? argv+1 : NULL;
     g.ttyfd = ttynew(g.term, &g.pid, cmd);

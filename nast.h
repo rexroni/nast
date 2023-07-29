@@ -137,6 +137,7 @@ typedef union {
     const char *s;
 } Arg;
 
+__attribute__((noreturn))
 void die(const char *, ...);
 
 void printscreen(Term *t, const Arg *);
@@ -150,6 +151,7 @@ void tnew(
     int row,
     char *font_name,
     int font_size,
+    char *delims,
     THooks *hooks
 );
 int trows(Term *t);
@@ -182,6 +184,9 @@ void *xmalloc(size_t);
 void *xrealloc(void *, size_t);
 char *xstrdup(char *);
 
+// returns 0 on error, truncates output if too long
+size_t utf8decodestr(const char *c, size_t clen, Rune *u, size_t umax);
+// utf8decode only decodes one rune
 size_t utf8decode(const char *, Rune *, size_t);
 Rune utf8decodebyte(char, size_t *);
 char utf8encodebyte(Rune, size_t);

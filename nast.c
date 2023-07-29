@@ -172,6 +172,10 @@ struct Term {
     int row;      /* nb row */
     int col;      /* nb col */
 
+    // word delimiters, for snap-to-word
+    Rune *delims;
+    size_t ndelims;
+
     // keyboard modes
     bool appkeypad;
     bool appcursor;
@@ -181,6 +185,18 @@ struct Term {
     // mouse stuff
     mouse_mode_e mouse;
     uint32_t press_history[2];
+    bool pressed;
+    // mouse coordinates are absolute
+    // last_press starts at 0,0
+    size_t last_press_x;
+    size_t last_press_y;
+    int last_press_type; // 0=none, 1=click, 2=doubleclick, 3=tripleclick
+    // selection: modified dynamically while mouse is pressed, or modified
+    size_t sel_xb;
+    size_t sel_yb;
+    size_t sel_xe;
+    size_t sel_ye;
+    int sel_type; // 0=none, 1=click, 2=doubleclick, 3=tripleclick
 
     // focus mode
     bool want_focus;
@@ -256,7 +272,7 @@ typedef struct {
 static void execsh(char **);
 // static void ttywriteraw(t, const char *, size_t);
 
-static void csidump(void);
+static void csidump(FILE *f);
 static void csihandle(Term *t);
 static void csiparse(void);
 static void csireset(void);
@@ -405,6 +421,24 @@ xstrdup(char *s)
     return s;
 }
 
+// returns 0 on error, truncates output if too long
+size_t
+utf8decodestr(const char *c, size_t clen, Rune *u, size_t umax)
+{
+    size_t n = 0;
+    size_t used;
+    size_t out = 0;
+    for(; n < clen; n += used){
+        Rune temp;
+        used = utf8decode(c + n, &temp, clen - n);
+        if(temp == UTF_INVALID) return 0;
+        if(out < umax) u[out] = temp;
+        out++;
+    }
+    return out;
+}
+
+// utf8decode only decodes one rune
 size_t
 utf8decode(const char *c, Rune *u, size_t clen)
 {
@@ -689,7 +723,9 @@ ttyread(Term *t)
 }
 
 // returns true if the event should cause a rerender
-bool tkeyev(Term *t, key_ev_t ev){
+bool
+tkeyev(Term *t, key_ev_t ev)
+{
     // build full mods, including terminal state
     int modify_other = t->modify_other;
     unsigned int mods = ev.mods;
@@ -756,7 +792,9 @@ bool tkeyev(Term *t, key_ev_t ev){
     return false;
 }
 
-static int mouse_register_press(uint32_t *hist, uint32_t ms){
+static int
+mouse_register_press(uint32_t *hist, uint32_t ms)
+{
     // detect first click, initialize buffer
     if(hist[0] == 0 && hist[1] == 0){
         hist[0] = ms - 1000;
@@ -778,12 +816,190 @@ static int mouse_register_press(uint32_t *hist, uint32_t ms){
     return 1;
 }
 
+static void
+sort_xy(size_t *x1, size_t *y1, size_t *x2, size_t *y2)
+{
+    if(*y1 < *y2) return;
+    if(*y1 == *y2 && *x1 <= *x2) return;
+    size_t xx = *x1;
+    size_t yy = *y1;
+    *x1 = *x2;
+    *y1 = *y2;
+    *x2 = xx;
+    *y2 = yy;
+}
+
+// returns bool ok
+static bool
+snap_peek(
+    Term *t,
+    size_t x,
+    size_t y,
+    size_t line_id,
+    int dir,
+    size_t *tx,
+    size_t *ty,
+    Glyph *g
+){
+    RLine *rline = get_rline(t->scr, y);
+    if(dir == -1){
+        if(x--){
+            *tx = x;
+            *ty = y;
+            *g = rline->glyphs[x];
+            return true;
+        }
+        while(y--){
+            rline = get_rline(t->scr, y);
+            if(rline->line_id != line_id) return false;
+            if(!rline->maxwritten) continue;
+            *tx = rline->maxwritten - 1;
+            *ty = y;
+            *g = rline->glyphs[*tx];
+            return true;
+        }
+        return false;
+    }
+    if(dir == +1){
+        if(++x < rline->maxwritten){
+            *tx = x;
+            *ty = y;
+            *g = rline->glyphs[x];
+            return true;
+        }
+        while(++y < t->scr->len){
+            rline = get_rline(t->scr, y);
+            if(rline->line_id != line_id) return false;
+            if(!rline->maxwritten) continue;
+            *tx = 0;
+            *ty = y;
+            *g = rline->glyphs[0];
+        }
+        return false;
+    }
+    die("invalid dir");
+}
+
+static bool isdelim(Term *t, Rune u){
+    Rune *delims = t->delims;
+    size_t n = t->ndelims;
+    for(size_t i = 0; i < n; i++){
+        if(u == delims[i]) return true;
+    }
+    return false;
+}
+
+static void
+snap_word(Term *t, size_t *x, size_t *y, int dir)
+{
+    // temp values we're peeking at
+    size_t tx = 0;
+    size_t ty = 0;
+    Glyph g = {0};
+    size_t line_id = get_rline(t->scr, *y)->line_id;
+    while(true){
+        bool ok = snap_peek(t, *x, *y, line_id, dir, &tx, &ty, &g);
+        if(!ok) return;
+        /* always include WDUMMY during snapping (it will never be part of the
+           selection buffer */
+        if(g.mode & ATTR_WDUMMY || !isdelim(t, g.u)){
+            *x = tx;
+            *y = ty;
+            continue;
+        }
+        // otherwise this is the end of our search
+        return;
+    }
+}
+
+static void
+tselect(Term *t, size_t xb, size_t yb, size_t xe, size_t ye, int type)
+{
+    sort_xy(&xb, &yb, &xe, &ye);
+    switch(type){
+        case 0:
+            // no selection at all
+            return;
+        case 1:
+            // no snapping
+            break;
+        case 2:
+            // snap to words
+            snap_word(t, &xb, &yb, -1);
+            snap_word(t, &xe, &ye, +1);
+            break;
+        case 3:
+            // snap to lines
+            xb = 0;
+            xe = get_rline(t->scr, ye)->maxwritten;
+            break;
+    }
+    t->sel_xb = xb;
+    t->sel_yb = yb;
+    t->sel_xe = xe;
+    t->sel_ye = ye;
+    t->sel_type = type;
+}
+
 // returns true if the event should cause a rerender
-bool tmouseev(Term *t, mouse_ev_t ev){
+bool
+tmouseev(Term *t, mouse_ev_t ev)
+{
+    size_t x, y;
+    if(ev.pix_coords){
+        // convert pixel coords to absolute coords
+        int tempx = (double)ev.x / t->grid_w;
+        LIMIT(tempx, 0, t->col);
+        x = tempx;
+        int tempy = (double)ev.y / t->grid_h;
+        LIMIT(tempy, 0, t->col);
+        y = window2abs(t, tempy);
+    }else{
+        x = ev.x;
+        y = ev.y;
+    }
+
     if(ev.type == MOUSE_EV_PRESS){
-        int click = mouse_register_press(t->press_history, ev.ms);
-        // we don't do anything with this yet
-        (void)click;
+        if(!ev.mods){
+            // regular click
+            t->pressed = true;
+            t->last_press_x = x;
+            t->last_press_y = y;
+            int type = mouse_register_press(t->press_history, ev.ms);
+            t->last_press_type = type;
+            switch(type){
+                case 1:
+                    // clear existing selection
+                    if(t->sel_type){
+                        t->sel_type = 0;
+                        return true;
+                    }
+                    return true;
+                case 2:
+                case 3:
+                    // start a new selection staring and ending here
+                    tselect(t, x, y, x, y, type);
+                    return true;
+            }
+        }
+        if(ev.mods == SHIFT_MASK){
+            // shift click
+            tselect(
+                t, t->last_press_x, t->last_press_y, x, y, t->last_press_type
+            );
+            return true;
+        }
+        // no other press types matter
+        return false;
+    }
+    if(ev.type == MOUSE_EV_RELEASE){
+        t->pressed = false;
+        return false;
+    }
+    if(ev.type == MOUSE_EV_MOTION){
+        if(!t->pressed) return false;
+        tselect(t, t->last_press_x, t->last_press_y, x, y, t->last_press_type);
+        return true;
     }
     if(ev.type == MOUSE_EV_SCROLL){
         // TODO: support alternateScroll mode and send scroll to application
@@ -793,7 +1009,9 @@ bool tmouseev(Term *t, mouse_ev_t ev){
     return false;
 }
 
-bool tfocusev(Term *t, bool focused){
+bool
+tfocusev(Term *t, bool focused)
+{
     if(!t->want_focus) return false;
     if(focused){
         t->hooks->ttywrite(t->hooks, "\x1b[I", 3);
@@ -975,20 +1193,27 @@ tnew(
     int row,
     char *font_name,
     int font_size,
+    char *delims,
     THooks *hooks
 ){
+    // convert utf8 string of char delimiters to rune delimiters
+    size_t delimslen = strlen(delims);
+    Rune *runedelims = xmalloc(delimslen * sizeof(*runedelims));
+    size_t ndelims = utf8decodestr(delims, delimslen, runedelims, delimslen);
+    if(!ndelims) die("invalid word delimiters");
+
     Term *t = xmalloc(sizeof(Term));
     *t = (Term){
         .c = {
             .attr = { .fg = defaultfg, .bg = defaultbg }
         },
+        .delims = runedelims,
+        .ndelims = ndelims,
         .hooks = hooks,
     };
 
     int ret = getfont(font_name, font_size, &t->desc, &t->grid_w, &t->grid_h);
-    if(ret < 0){
-        die("invalid font\n");
-    }
+    if(ret < 0) die("invalid font\n");
 
     // allocate history (primary screen, lots of scrollback)
     t->main.cap = RLINES_LIMIT - 1;
@@ -1600,7 +1825,7 @@ tsetattr(Term *t, int *attr, int l)
                 fprintf(
                     stderr, "erresc(default): gfx attr %d unknown: ", attr[i]
                 );
-                csidump();
+                csidump(stderr);
             }
             break;
         }
@@ -1817,8 +2042,8 @@ int tgetmode(Term *t, int priv, int arg){
 void
 csihandle(Term *t)
 {
-    // fprintf(stderr, "csihandle(): ");
-    // csidump();
+    // printf("csihandle(): ");
+    // csidump(stdout);
     char buf[40];
     int len;
     int lvl;
@@ -2192,34 +2417,34 @@ csihandle(Term *t)
     default:
     unknown:
         fprintf(stderr, "erresc: unknown csi ");
-        csidump();
+        csidump(stderr);
         /* die(""); */
         break;
     }
 }
 
 void
-csidump(void)
+csidump(FILE *f)
 {
     size_t i;
     uint c;
 
-    fprintf(stderr, "ESC[");
+    fprintf(f, "ESC[");
     for (i = 0; i < csiescseq.len; i++) {
         c = csiescseq.buf[i] & 0xff;
         if (isprint(c)) {
-            putc(c, stderr);
+            putc(c, f);
         } else if (c == '\n') {
-            fprintf(stderr, "(\\n)");
+            fprintf(f, "(\\n)");
         } else if (c == '\r') {
-            fprintf(stderr, "(\\r)");
+            fprintf(f, "(\\r)");
         } else if (c == 0x1b) {
-            fprintf(stderr, "(\\e)");
+            fprintf(f, "(\\e)");
         } else {
-            fprintf(stderr, "(%02x)", c);
+            fprintf(f, "(%02x)", c);
         }
     }
-    putc('\n', stderr);
+    putc('\n', f);
 }
 
 void
@@ -2981,10 +3206,10 @@ check_control_code:
         // All characters which form part of a sequence are not printed
         return;
     }
-    if (sel.ob.x != -1 && BETWEEN(t->c.y, sel.ob.y, sel.oe.y)){
-        // TODO:SELECTIONS
-        // selclear(t);
-    }
+    // TODO:SELECTIONS
+    // if (sel.ob.x != -1 && BETWEEN(t->c.y, sel.ob.y, sel.oe.y)){
+    //     // selclear(t);
+    // }
 
     u = acsc(u, t->trantbl[t->charset]);
     temit(t, u, width);
@@ -3573,12 +3798,23 @@ static fmt_overrides_t t_get_fmt_override(Term *t, int y_abs){
     if(term2abs(t, t->c.y) == y_abs){
         cursor = t->c.x;
     }
-    return (fmt_overrides_t){
-        .cursor = cursor,
-        // we don't support selections yet
-        .sel_first = -1,
-        .sel_last = -1,
-    };
+    int sel_first = -1;
+    int sel_last = -1;
+    if(t->sel_type && y_abs >= t->sel_yb && y_abs <= t->sel_ye){
+        if(y_abs == t->sel_yb){
+            // this is the first line of the selection
+            sel_first = t->sel_xb;
+        }else{
+            sel_first = 0;
+        }
+        if(y_abs == t->sel_ye){
+            // this is the last line of selection
+            sel_last = t->sel_xe;
+        }else{
+            sel_last = INT_MAX;
+        }
+    }
+    return (fmt_overrides_t){cursor, sel_first, sel_last};
 }
 
 static bool ovr_eq(fmt_overrides_t a, fmt_overrides_t b){
