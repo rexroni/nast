@@ -4,11 +4,11 @@ cc = meson.get_compiler('c')
 
 deps = [
   dependency('gtk+-3.0'),
-  dependency('fontconfig'),
+  dependency('cairo'),
+  dependency('pango'),
+  dependency('X11'),
   cc.find_library('m', required: false),
   cc.find_library('util'),
-  cc.find_library('X11'),
-  cc.find_library('Xft'),
 ]
 
 executable(

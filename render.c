@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <cairo.h>
 #include <gtk/gtk.h>
-#include <cairo/cairo-xlib.h>
+#include <cairo-xlib.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
