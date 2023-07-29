@@ -276,21 +276,19 @@ static void tclearregion_term(Term *t, int, int, int, int);
 static void tcursor(Term *t, int);
 static int tcursorstyle(Term *t, int);
 static void tdeletechar(Term *t, int);
-static void tdeleteline(Term *t, int);
 static void mod_line_group(Term *t, size_t, int);
 static void tinsertblank(Term *t, int);
-static void tinsertblankline(Term *t, int);
 // static int tlinelen(Term *t, int);
-static void tmoveto(Term *t, int, int);
-static void tmoveto_origin(Term *t, int x, int y);
+static void tmoveto(Term *t, int, int, bool);
+static void tmoveto_origin(Term *t, int x, int y, bool);
 static Rune acsc(Rune u, int charset);
 static void tnewline(Term *t, int, bool);
 static void tputtab(Term *t, int);
 static void tputc(Term *t, Rune);
 static void treset(Term *t);
 static RLine *scr_new_rline(Screen *scr, uint64_t line_id, size_t cols);
-static void tscrollup(Term *t, int, int, int);
-static void tscrolldown(Term *t, int, int, int);
+static void tscrollup(Term *t, int, int, int, bool);
+static void tscrolldown(Term *t, int, int, int, bool);
 static void tsetattr(Term *t, int *, int);
 static void tsetchar(Term *t, Rune, Glyph *, int, int);
 static void tswapscreen(Term *t);
@@ -824,7 +822,7 @@ tcursor(Term *t, int mode)
         t->saved[alt] = t->c;
     } else if (mode == CURSOR_LOAD) {
         t->c = t->saved[alt];
-        tmoveto(t, t->saved[alt].x, t->saved[alt].y);
+        tmoveto(t, t->saved[alt].x, t->saved[alt].y, false);
     }
 }
 
@@ -872,7 +870,7 @@ treset(Term *t)
     t->charset = 0;
 
     for (i = 0; i < 2; i++) {
-        tmoveto(t, 0, 0);
+        tmoveto(t, 0, 0, true);
         tcursor(t, CURSOR_SAVE);
         tclearregion_abs(t, 0, 0, t->col-1, t->scr->len - 1);
         tswapscreen(t);
@@ -1066,16 +1064,16 @@ tswapscreen(Term *t)
 }
 
 void
-tnewline(Term *t, int first_col, bool continue_line)
+tnewline(Term *t, int first_col, bool break_line_id)
 {
     t->c.state &= ~CURSOR_WRAPNEXT;
     if(first_col) t->c.x = 0;
 
     uint64_t line_id;
-    if(continue_line){
-        line_id = get_cursor_rline(t)->line_id;
-    }else{
+    if(break_line_id){
         line_id = new_line_id(t->scr);
+    }else{
+        line_id = get_cursor_rline(t)->line_id;
     }
 
     /* if we are not in the scroll region, or if we not at the very bottom of
@@ -1094,7 +1092,7 @@ tnewline(Term *t, int first_col, bool continue_line)
     /* if the scroll region does not include the top, we will drop scroll
        history, which does not involve adding new lines */
     if(t->top != 0){
-        tscrollup(t, t->top, t->bot, 1);
+        tscrollup(t, t->top, t->bot, 1, false);
         // we are now pointed at a freshly cleared line
         get_cursor_rline(t)->line_id = line_id;
         return;
@@ -1161,21 +1159,21 @@ csiparse(void)
 
 // uses terminal coordinates
 void
-tmoveto(Term *t, int x, int y)
+tmoveto(Term *t, int x, int y, bool break_line_id)
 {
     t->c.state &= ~CURSOR_WRAPNEXT;
-    /* any absolute line movements break line reflows, but only if a character
-       is actually typed there */
-    t->scr->new_line_id_on_write = true;
     t->c.x = LIMIT(x, 0, t->col-1);
     t->c.y = LIMIT(y, 0, t->row-1);
+    // only break the line id after the next character is written
+    if(break_line_id) t->scr->new_line_id_on_write = true;
 }
 
 // uses terminal coordinates, modded by the scroll region in origin mode
 void
-tmoveto_origin(Term *t, int x, int y)
+tmoveto_origin(Term *t, int x, int y, bool break_line_id)
 {
-    tmoveto(t, x, y + ((t->c.state & CURSOR_ORIGIN) ? t->top: 0));
+    int yorigin = y + ((t->c.state & CURSOR_ORIGIN) ? t->top: 0);
+    tmoveto(t, x, yorigin, break_line_id);
 }
 
 // see man 5 terminfo ("Line Graphics")
@@ -1346,20 +1344,6 @@ tinsertblank(Term *t, int n)
     die("update tinsertblank");
 }
 
-void
-tinsertblankline(Term *t, int n)
-{
-    // insert blank lines is just scrolling down from cursor to the bottom
-    tscrolldown(t, t->c.y, t->bot, n);
-}
-
-void
-tdeleteline(Term *t, int n)
-{
-    // delete lines is just scrolling up from cursor to the bottom
-    tscrollup(t, t->c.y, t->bot, n);
-}
-
 // replace the line_ids of the contiguous group at y with a new line_id
 // dir can be +1 or -1, depending on which direction to look for matches
 void mod_line_group(Term *t, size_t idx, int dir){
@@ -1378,7 +1362,6 @@ void mod_line_group(Term *t, size_t idx, int dir){
 }
 
 // scroll lines upwards in a specified window, cursor stays in place
-// caller should consider if it is appropriate to break line_id
 /*
    Example: t->row = 8, top = 1, bot = 6, n = 2
 
@@ -1393,7 +1376,7 @@ void mod_line_group(Term *t, size_t idx, int dir){
      7
      --------------------
 */
-void tscrollup(Term *t, int top, int bot, int n){
+void tscrollup(Term *t, int top, int bot, int n, bool break_line_id){
     LIMIT(top, 0, t->row - 1);
     LIMIT(bot, 0, t->row - 1);
     if(top >= bot) return;
@@ -1424,10 +1407,10 @@ void tscrollup(Term *t, int top, int bot, int n){
     }
     // step 3: modify the new top line group's line_id, moving downwards
     mod_line_group(t, term2abs(t, top), +1);
+    if(break_line_id) t->scr->new_line_id_on_write = true;
 }
 
 // scroll lines downwards in a specified window, cursor stays in place
-// scrolling downwards always breaks line ids
 /*
    Example: t->row = 8, top = 1, bot = 6, n = 2
 
@@ -1442,7 +1425,7 @@ void tscrollup(Term *t, int top, int bot, int n){
      7
      --------------------
 */
-void tscrolldown(Term *t, int top, int bot, int n){
+void tscrolldown(Term *t, int top, int bot, int n, bool break_line_id){
     LIMIT(top, 0, t->row - 1);
     LIMIT(bot, 0, t->row - 1);
     if(top >= bot) return;
@@ -1473,8 +1456,7 @@ void tscrolldown(Term *t, int top, int bot, int n){
     }
     // step 3: modify the new bottom line group's line_id, moving upwards
     mod_line_group(t, term2abs(t, bot + 1 - n), -1);
-    // scroll downwards breaks line_ids
-    t->scr->new_line_id_on_write = true;
+    if(break_line_id) t->scr->new_line_id_on_write = true;
 }
 
 struct rgb24
@@ -1661,7 +1643,7 @@ tsetmode(Term *t, int priv, int set, int *args, int narg)
                 break;
             case 6: /* DECOM -- Origin */
                 MODBIT(t->c.state, set, CURSOR_ORIGIN);
-                tmoveto_origin(t, 0, 0);
+                tmoveto_origin(t, 0, 0, true);
                 break;
             case 7: /* DECAWM -- Auto wrap */
                 MODBIT(t->mode, set, MODE_WRAP);
@@ -1850,13 +1832,13 @@ csihandle(Term *t)
     case 'A': /* CUU -- Cursor <n> Up */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, t->c.x, t->c.y-csiescseq.arg[0]);
+        tmoveto(t, t->c.x, t->c.y-csiescseq.arg[0], true);
         break;
     case 'B': /* CUD -- Cursor <n> Down */
     case 'e': /* VPR --Cursor <n> Down */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, t->c.x, t->c.y+csiescseq.arg[0]);
+        tmoveto(t, t->c.x, t->c.y+csiescseq.arg[0], true);
         break;
     case 'i': /* MC -- Media Copy */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -1897,22 +1879,22 @@ csihandle(Term *t)
     case 'a': /* HPR -- Cursor <n> Forward */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, t->c.x+csiescseq.arg[0], t->c.y);
+        tmoveto(t, t->c.x+csiescseq.arg[0], t->c.y, false);
         break;
     case 'D': /* CUB -- Cursor <n> Backward */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, t->c.x-csiescseq.arg[0], t->c.y);
+        tmoveto(t, t->c.x-csiescseq.arg[0], t->c.y, false);
         break;
     case 'E': /* CNL -- Cursor <n> Down and first col */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, 0, t->c.y+csiescseq.arg[0]);
+        tmoveto(t, 0, t->c.y+csiescseq.arg[0], true);
         break;
     case 'F': /* CPL -- Cursor <n> Up and first col */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, 0, t->c.y-csiescseq.arg[0]);
+        tmoveto(t, 0, t->c.y-csiescseq.arg[0], true);
         break;
     case 'g': /* TBC -- Tabulation clear */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -1931,14 +1913,14 @@ csihandle(Term *t)
     case '`': /* HPA */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto(t, csiescseq.arg[0]-1, t->c.y);
+        tmoveto(t, csiescseq.arg[0]-1, t->c.y, false);
         break;
     case 'H': /* CUP -- Move to <row> <col> */
     case 'f': /* HVP */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
         DEFAULT(csiescseq.arg[1], 1);
-        tmoveto_origin(t, csiescseq.arg[1]-1, csiescseq.arg[0]-1);
+        tmoveto_origin(t, csiescseq.arg[1]-1, csiescseq.arg[0]-1, true);
         break;
     case 'I': /* CHT -- Cursor Forward Tabulation <n> tab stops */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -1993,19 +1975,20 @@ csihandle(Term *t)
     case 'S': /* SU -- Scroll <n> line up */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tscrollup(t, t->top, t->bot, csiescseq.arg[0]);
-        // scrolling up in this way breaks line id
-        t->scr->new_line_id_on_write = true;
+        tscrollup(t, t->top, t->bot, csiescseq.arg[0], true);
         break;
     case 'T': /* SD -- Scroll <n> line down */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tscrolldown(t, t->top, t->bot, csiescseq.arg[0]);
+        tscrolldown(t, t->top, t->bot, csiescseq.arg[0], true);
         break;
     case 'L': /* IL -- Insert <n> blank lines */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tinsertblankline(t, csiescseq.arg[0]);
+        // insert blank lines is just scrolling down from cursor to the bottom
+        /* no need to break line id because we're going to be pointing at a
+           newly reset line */
+        tscrolldown(t, t->c.y, t->bot, csiescseq.arg[0], false);
         break;
     case 'l': /* RM -- Reset Mode */
         if(csiescseq.priv && csiescseq.priv != '?') goto unknown;
@@ -2015,7 +1998,10 @@ csihandle(Term *t)
     case 'M': /* DL -- Delete <n> lines */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tdeleteline(t, csiescseq.arg[0]);
+        // delete lines is just scrolling up from cursor to the bottom
+        /* no need to break line id because we're going to be pointing at a
+           line which just got mod_line_group()'d */
+        tscrollup(t, t->c.y, t->bot, csiescseq.arg[0], false);
         break;
     case 'X': /* ECH -- Erase <n> char */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -2037,7 +2023,7 @@ csihandle(Term *t)
     case 'd': /* VPA -- Move to <row> */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
         DEFAULT(csiescseq.arg[0], 1);
-        tmoveto_origin(t, t->c.x, csiescseq.arg[0]-1);
+        tmoveto_origin(t, t->c.x, csiescseq.arg[0]-1, true);
         break;
     case 'h': /* SM -- Set terminal mode */
         if(csiescseq.priv && csiescseq.priv != '?') goto unknown;
@@ -2100,7 +2086,7 @@ csihandle(Term *t)
         DEFAULT(csiescseq.arg[0], 1);
         DEFAULT(csiescseq.arg[1], t->row);
         tscrollregion(t, csiescseq.arg[0]-1, csiescseq.arg[1]-1);
-        tmoveto_origin(t, 0, 0);
+        tmoveto_origin(t, 0, 0, true);
         break;
     case 's': /* DECSC -- Save cursor position (ANSI.SYS) */
         if(csiescseq.priv || csiescseq.submode) goto unknown;
@@ -2715,17 +2701,17 @@ tcontrolcode(Term *t, uchar ascii)
         tputtab(t, 1);
         return;
     case '\b':   /* BS */
-        tmoveto(t, t->c.x-1, t->c.y);
+        tmoveto(t, t->c.x-1, t->c.y, false);
         return;
     case '\r':   /* CR */
-        tmoveto(t, 0, t->c.y);
+        tmoveto(t, 0, t->c.y, true);
         return;
     case '\f':   /* LF */
     case '\v':   /* VT */
     case '\n':   /* LF */
         /* go to first col if the mode is set */
         // printf("temit(\\n)\n");
-        tnewline(t, IS_SET(t, MODE_CRLF), false);
+        tnewline(t, IS_SET(t, MODE_CRLF), true);
         return;
     case '\a':   /* BEL */
         if (t->esc & ESC_STR_END) {
@@ -2762,7 +2748,7 @@ tcontrolcode(Term *t, uchar ascii)
     case 0x84:   /* TODO: IND */
         break;
     case 0x85:   /* NEL -- Next line */
-        tnewline(t, 1, false); /* always go to first col */
+        tnewline(t, 1, true); /* always go to first col */
         break;
     case 0x86:   /* TODO: SSA */
     case 0x87:   /* TODO: ESA */
@@ -2841,22 +2827,22 @@ eschandle(Term *t, uchar ascii)
         return 0;
     case 'D': /* IND -- Linefeed, move cursor directly downwards */
         if (t->c.y == t->bot) {
-            tscrollup(t, t->top, t->bot, 1);
+            tscrollup(t, t->top, t->bot, 1, true);
         } else {
-            tmoveto(t, t->c.x, t->c.y+1);
+            tmoveto(t, t->c.x, t->c.y+1, true);
         }
         break;
     case 'E': /* NEL -- Next line */
-        tnewline(t, 1, false); /* always go to first col */
+        tnewline(t, 1, true); /* always go to first col */
         break;
     case 'H': /* HTS -- Horizontal tab stop */
         t->tabs[t->c.x] = 1;
         break;
     case 'M': /* RI -- Reverse index, move cursor directly upwards */
         if (t->c.y == t->top) {
-            tscrolldown(t, t->top, t->bot, 1);
+            tscrolldown(t, t->top, t->bot, 1, true);
         } else {
-            tmoveto(t, t->c.x, t->c.y-1);
+            tmoveto(t, t->c.x, t->c.y-1, true);
         }
         break;
     case 'Z': /* DECID -- Identify Terminal */
@@ -3016,7 +3002,7 @@ temit(Term *t, Rune u, int width)
     if(t->c.state & CURSOR_WRAPNEXT){
         t->c.state &= ~CURSOR_WRAPNEXT;
         rline->glyphs[t->c.x].mode |= ATTR_WRAP;
-        tnewline(t, 1, true);
+        tnewline(t, 1, false);
         // the rline has most likely changed
         rline = get_cursor_rline(t);
     }
