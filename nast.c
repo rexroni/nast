@@ -98,7 +98,6 @@ enum term_mode {
 
     // right now, none of these are actually honored
     MODE_VISIBLE     = 1 << 9,
-    MODE_FOCUSED     = 1 << 10,
     MODE_REVERSE     = 1 << 11,
     MODE_KBDLOCK     = 1 << 12,
     MODE_HIDE        = 1 << 13,
@@ -178,6 +177,8 @@ struct Term {
     Rune *delims;
     size_t ndelims;
 
+    int font_size;
+
     // keyboard modes
     bool appkeypad;
     bool appcursor;
@@ -204,6 +205,7 @@ struct Term {
 
     // focus mode
     bool want_focus;
+    bool focused;
 
     // font stuff
     PangoFontDescription *desc;
@@ -1109,13 +1111,14 @@ tmouseev(Term *t, mouse_ev_t ev)
 bool
 tfocusev(Term *t, bool focused)
 {
-    if(!t->want_focus) return false;
-    if(focused){
-        t->hooks->ttywrite(t->hooks, "\x1b[I", 3);
-    }else{
-        t->hooks->ttywrite(t->hooks, "\x1b[O", 3);
+    if(t->focused == focused) return false;
+    t->focused = focused;
+    // we'll always rerender the cursor
+    rline_unrender(get_rline(t->scr, t->c.y));
+    if(t->want_focus){
+        t->hooks->ttywrite(t->hooks, focused ? "\x1b[I" : "\x1b[O", 3);
     }
-    return false;
+    return true;
 }
 
 bool
@@ -1348,6 +1351,7 @@ tnew(
 
     t->row = row;
     t->col = col;
+    t->font_size = font_size;
 
     t->tabs = xrealloc(t->tabs, col * sizeof(*t->tabs));
 
@@ -1373,6 +1377,7 @@ int tsetfont(Term *t, char *font_name, int font_size){
 
     pango_font_description_free(t->desc);
     t->desc = desc;
+    t->font_size = font_size;
     t->grid_w = grid_w;
     t->grid_h = grid_h;
     return 0;
@@ -3927,9 +3932,12 @@ RLine *scr_new_rline(Screen *scr, Term *t, uint64_t line_id, size_t cols){
 }
 
 static fmt_overrides_t t_get_fmt_override(Term *t, int y_abs){
-    int cursor = -1;
+    int cursor = INT_MIN;
     if(term2abs(t, t->c.y) == y_abs){
         cursor = t->c.x;
+        if(!t->focused){
+            cursor = -cursor - 1;
+        }
     }
     int sel_first = -1;
     int sel_last = -1;
@@ -3963,7 +3971,7 @@ static Glyph calc_fmt(fmt_overrides_t ovr, Glyph g, size_t x){
             g.bg = old_fg;
         }
     }
-    if(ovr.cursor > -1 && x == (size_t)ovr.cursor){
+    if(ovr.cursor != INT_MIN && x == (size_t)ovr.cursor){
         // white fg, bright red bg
         g.fg = rgb24_from_index(7);
         g.bg = rgb24_from_index(9);
@@ -3976,6 +3984,7 @@ typedef struct {
     double grid_w;
     double grid_h;
     double render_w;
+    double font_size;
     PangoFontDescription *desc;
 } rctx_t;
 
@@ -4062,6 +4071,28 @@ void rline_render(RLine *rline, rctx_t rctx, fmt_overrides_t ovr){
     }
     // render the final chunk
     rline_subrender(rline, rctx, cr, layout, x, start, rline->n_glyphs, fmt);
+
+    // if screen is not focused, draw a box instead of a cursor
+    if(ovr.cursor != INT_MIN && ovr.cursor < 0){
+        // pick cursor color
+        cairo_set_source_rgb(cr, rgb24_from_index(9).r/255., 0, 0);
+        // pick a line width
+        double line_width = rctx.font_size / 10.;
+        if(line_width < 1.0) line_width = 1.0;
+        cairo_set_line_width(cr, line_width);
+        // nudge coordinates to make outside of stroke match cursor dimensions
+        double d = line_width / 2;
+        double dd = line_width;
+        int cursor = -(ovr.cursor + 1);
+        cairo_rectangle(cr,
+            cursor * rctx.grid_w + d, // x
+            d,                        // y
+            rctx.grid_w - dd,         // width
+            rctx.grid_h - dd          // height
+        );
+        cairo_stroke(cr);
+    }
+
     g_object_unref(layout);
     cairo_destroy(cr);
 }
@@ -4178,6 +4209,7 @@ void trender(
         .grid_w = t->grid_w,
         .grid_h = t->grid_h,
         .render_w = t->render_w,
+        .font_size = t->font_size,
         .desc = t->desc,
     };
 

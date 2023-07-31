@@ -95,7 +95,8 @@ typedef struct {
 
 // format overrides alter how an rline renders without altering the content
 typedef struct {
-    // -1 for 'not present'
+    // negative index - 1 for 'present but not focused'
+    // INT_MIN for 'not present'
     int cursor;
     int sel_first;
     int sel_last;

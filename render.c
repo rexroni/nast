@@ -346,7 +346,7 @@ static gboolean on_key_event(
     }
 
     key_ev_t ev = { key, mods };
-    int redraw = tkeyev(g->term, ev);
+    bool redraw = tkeyev(g->term, ev);
     if(redraw) gtk_widget_queue_draw(g->darea);
     return FALSE;
 }
@@ -359,7 +359,8 @@ static gboolean on_focus_in(
     (void)widget;
     (void)event;
     globals_t *g = user_data;
-    tfocusev(g->term, true);
+    bool redraw = tfocusev(g->term, true);
+    if(redraw) gtk_widget_queue_draw(g->darea);
     return FALSE;
 }
 
@@ -371,7 +372,8 @@ static gboolean on_focus_out(
     (void)widget;
     (void)event;
     globals_t *g = user_data;
-    tfocusev(g->term, false);
+    bool redraw = tfocusev(g->term, false);
+    if(redraw) gtk_widget_queue_draw(g->darea);
     return FALSE;
 }
 
