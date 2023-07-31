@@ -491,6 +491,18 @@ static gboolean on_scroll_event(
     return FALSE;
 }
 
+// https://docs.gtk.org/gtk3/signal.Widget.realize.html
+// https://stackoverflow.com/a/35440192/4951379
+static void on_realize(GtkWidget* widget, gpointer user_data){
+    (void)user_data;
+    // configure a text-type cursor
+    GdkDisplay *display = gtk_widget_get_display(widget);
+    GdkWindow *gdkwin = gtk_widget_get_window(widget);
+    GdkCursor *textcursor = gdk_cursor_new_from_name(display, "text");
+    if(!textcursor) die("gdk_cursor_new_from_name");
+    gdk_window_set_cursor(gdkwin, textcursor);
+}
+
 static gboolean tty_read(GIOChannel *src, globals_t *g){
     gchar buf[16384];
     GError *err = NULL;
@@ -691,6 +703,9 @@ int main(int argc, char *argv[]){
     gtk_window_set_position(GTK_WINDOW(g.window), GTK_WIN_POS_CENTER);
     gtk_window_set_default_size(GTK_WINDOW(g.window), 400, 400);
     gtk_window_set_title(GTK_WINDOW(g.window), "nast");
+
+    // configure a text-type cursor, when we are "realized"
+    g_signal_connect(G_OBJECT(g.window), "realize", G_CALLBACK(on_realize), &g);
 
     gtk_widget_show_all(g.window);
 
