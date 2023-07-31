@@ -95,10 +95,10 @@ enum term_mode {
     MODE_UTF8        = 1 << 6,
     MODE_SIXEL       = 1 << 7,
     MODE_BRCKTPASTE  = 1 << 8,
+    MODE_REVERSE     = 1 << 9,
 
     // right now, none of these are actually honored
-    MODE_VISIBLE     = 1 << 9,
-    MODE_REVERSE     = 1 << 11,
+    MODE_VISIBLE     = 1 << 11,
     MODE_KBDLOCK     = 1 << 12,
     MODE_HIDE        = 1 << 13,
     MODE_8BIT        = 1 << 15,
@@ -3962,13 +3962,23 @@ static bool ovr_eq(fmt_overrides_t a, fmt_overrides_t b){
     return memcmp(&a, &b, sizeof(a)) == 0;
 }
 
+void swap_rgb(struct rgb24 *a, struct rgb24 *b){
+    struct rgb24 temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
 static Glyph calc_fmt(fmt_overrides_t ovr, Glyph g, size_t x){
+    if(g.mode & ATTR_REVERSE){
+        // handle reverse video here
+        swap_rgb(&g.fg, &g.bg);
+        // ok, it's handled now
+        g.mode &= ~ATTR_REVERSE;
+    }
     if(ovr.sel_first > -1 && ovr.sel_last > -1){
         // selection reverses its bg/fg
         if(x >= (size_t)ovr.sel_first && x <= (size_t)ovr.sel_last){
-            struct rgb24 old_fg = g.fg;
-            g.fg = g.bg;
-            g.bg = old_fg;
+            swap_rgb(&g.fg, &g.bg);
         }
     }
     if(ovr.cursor != INT_MIN && x == (size_t)ovr.cursor){
@@ -3988,6 +3998,44 @@ typedef struct {
     PangoFontDescription *desc;
 } rctx_t;
 
+PangoAttrList*
+make_pango_attrs(Glyph fmt)
+{
+    enum glyph_attribute all = ATTR_BOLD | ATTR_FAINT | ATTR_ITALIC
+                             | ATTR_UNDERLINE | ATTR_STRUCK;
+    if(!(fmt.mode & all)) return NULL;
+    // new attr list
+    PangoAttrList *attrs = pango_attr_list_new();
+    if(!attrs) die("pango_attr_list_new");
+    if(fmt.mode & (ATTR_BOLD | ATTR_FAINT)){
+        // bold/faint
+        PangoWeight weight = PANGO_WEIGHT_LIGHT;
+        if(fmt.mode & ATTR_BOLD) weight = PANGO_WEIGHT_BOLD;
+        PangoAttribute *attr = pango_attr_weight_new(weight);
+        if(!attr) die("pango_attr_weight_new");
+        pango_attr_list_insert(attrs, attr);
+    }
+    if(fmt.mode & ATTR_ITALIC){
+        // italic
+        PangoAttribute *attr = pango_attr_style_new(PANGO_STYLE_ITALIC);
+        if(!attr) die("pango_attr_style_new");
+        pango_attr_list_insert(attrs, attr);
+    }
+    if(fmt.mode & ATTR_UNDERLINE){
+        // underline
+        PangoUnderline underline = PANGO_UNDERLINE_SINGLE;
+        PangoAttribute *attr = pango_attr_underline_new(underline);
+        if(!attr) die("pango_attr_underline_new");
+        pango_attr_list_insert(attrs, attr);
+    }
+    if(fmt.mode & ATTR_STRUCK){
+        PangoAttribute *attr = pango_attr_strikethrough_new(TRUE);
+        if(!attr) die("pango_attr_strikethrough_new");
+        pango_attr_list_insert(attrs, attr);
+    }
+    return attrs;
+}
+
 // render
 double rline_subrender(
     RLine *rline,
@@ -3997,7 +4045,7 @@ double rline_subrender(
     double x,
     size_t start,
     size_t end,
-    // fmt is provided separately, since it may be overridden
+    // fmt is provided separately, since it may have been overridden
     Glyph fmt
 ){
     // expand glyphs back into utf8 for pango
@@ -4007,6 +4055,10 @@ double rline_subrender(
     for(size_t i = start; i < end; i++){
         utf8_len += utf8encode(rline->glyphs[i].u, &utf8[utf8_len]);
     }
+
+    PangoAttrList *attrs = make_pango_attrs(fmt);
+    pango_layout_set_attributes(layout, attrs);
+    if(attrs) pango_attr_list_unref(attrs);
 
     pango_layout_set_text(layout, utf8, utf8_len);
 
