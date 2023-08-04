@@ -1676,7 +1676,41 @@ tdeletechar(Term *t, int n)
 void
 tinsertblank(Term *t, int n)
 {
-    die("update tinsertblank");
+    int x = t->c.x;
+    LIMIT(n, 0, t->col - t->c.x);
+    RLine *rline = get_rline(t->scr, t->c.y);
+    size_t len = rline->maxwritten;
+
+    // are there glyphs to right-shift?
+    bool shift = x < len && x + n < t->col;
+    // will this break the line_id? (will there be dropped characters?)
+    bool breaks_line_id = len + n > t->col;
+
+    if(shift){
+        void *src = &rline->glyphs[x];
+        void *dst = &rline->glyphs[x + n];
+        size_t count = len - x;
+        LIMIT(count, 0, t->col - x - n);
+        memmove(dst, src, count * sizeof(*rline->glyphs));
+        // update maxwritten
+        rline->maxwritten += n;
+        if(rline->maxwritten > t->col) rline->maxwritten = t->col;
+    }
+
+    if(breaks_line_id) rline->line_id = new_line_id(t->scr);
+
+    // mark this line as dirty
+    rline_unrender(rline);
+
+    // actually write the blanks
+    for(int i = 0; i < n; i++){
+        rline->glyphs[x + i] = (Glyph){
+            // default rune is ' ' so that cursor-on-empty-space works
+            .u = ' ',
+            .fg = t->c.attr.fg,
+            .bg = t->c.attr.bg,
+        };
+    }
 }
 
 // replace the line_ids of the contiguous group at y with a new line_id
