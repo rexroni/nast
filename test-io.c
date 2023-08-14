@@ -18,7 +18,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -432,7 +431,7 @@ void testlog(int ret, char *msg){
     fprintf(stderr, "- %s\n", msg);
 }
 
-int run_test(int kbd, int conn, bool isnast){
+int run_test(int kbd, int conn){
     int ret = 0;
 
     int numlock;
@@ -486,13 +485,7 @@ int run_test(int kbd, int conn, bool isnast){
     CTL(NUM); EXPECT("1\x00\x1b\x1c\x1d\x1e\x1f\x7f""90");
     CTL(PUNC); EXPECT("\x00-\x1c;',.\x1f\x1b\x1d");
     CTL(ARROWS); EXPECT("\x1b[1;5A\x1b[1;5B\x1b[1;5C\x1b[1;5D");
-    CTL(SPECIAL);
-    if(isnast){
-        // nast converts ctrl+bksp to ctrl+w (0x7f -> 0x17)
-        EXPECT("\x00\t\x17\r");
-    }else{
-        EXPECT("\x00\t\x7f\r");
-    }
+    CTL(SPECIAL); EXPECT("\x00\t\x7f\r");
     CTL(INSDEL);  EXPECT("\x1b[2;5~\x1b[1;5H\x1b[5;5~"
                          "\x1b[3;5~\x1b[1;5F\x1b[6;5~");
     ret = numlock_off(ret, kbd, &numlock);
@@ -768,12 +761,7 @@ int run_test(int kbd, int conn, bool isnast){
         "\x1b[27;8;60~\x1b[27;8;62~\x1b[27;8;63~\xc2\x9b\xc2\x9d"
     );
     CTL(ARROWS); EXPECT("\x1b[1;5A\x1b[1;5B\x1b[1;5C\x1b[1;5D");
-    CTL(SPECIAL);
-    if(isnast){
-        EXPECT("\x00\x1b[27;5;9~\x17\x1b[27;5;13~");
-    }else{
-        EXPECT("\x00\x1b[27;5;9~\x7f\x1b[27;5;13~");
-    }
+    CTL(SPECIAL); EXPECT("\x00\x1b[27;5;9~\x7f\x1b[27;5;13~");
     CTL(INSDEL);  EXPECT("\x1b[2;5~\x1b[1;5H\x1b[5;5~"
                          "\x1b[3;5~\x1b[1;5F\x1b[6;5~");
     ret = numlock_off(ret, kbd, &numlock);
@@ -800,7 +788,7 @@ int run_test(int kbd, int conn, bool isnast){
     return ret;
 }
 
-int test_against_term(int sock, int kbd, bool isnast){
+int test_against_term(int sock, int kbd){
     // wait for a connection from io process inside terminal
     int conn = accept(sock, NULL, 0);
     if(conn < 0){
@@ -814,7 +802,7 @@ int test_against_term(int sock, int kbd, bool isnast){
     ret = send_msg(ret, conn, "\x1b[?1035l", 8);
     if(ret) return 1;
 
-    int retval = run_test(kbd, conn, isnast);
+    int retval = run_test(kbd, conn);
 
     close(conn);
 
@@ -888,7 +876,7 @@ int main(int argc, char **argv){
     char *xterm[] = {"xterm", "-fa", "Monospace", "-fs", "16", "./io", NULL};
     pid_t pid = start_term(xterm);
     if(pid < 0) return 1;
-    int retval = test_against_term(sock, kbd, false);
+    int retval = test_against_term(sock, kbd);
     ret = await_child(pid);
     if(retval) return retval;
     if(ret) return ret;
@@ -898,7 +886,7 @@ int main(int argc, char **argv){
     char *nast[] = {"./nast", "./io", NULL};
     pid = start_term(nast);
     if(pid < 0) return 1;
-    retval = test_against_term(sock, kbd, true);
+    retval = test_against_term(sock, kbd);
     ret = await_child(pid);
     if(retval) return retval;
     if(ret) return ret;

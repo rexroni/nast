@@ -340,11 +340,6 @@ static gboolean on_key_event(
         return FALSE;
     }
 
-    // convert ctrl+backspace to ctrl+w (for backspace-by-word)
-    if(key == NAST_KEY_BKSP && mods == CTRL_MASK){
-        key = 'w';
-    }
-
     key_ev_t ev = { key, mods };
     bool redraw = tkeyev(g->term, ev);
     if(redraw) gtk_widget_queue_draw(g->darea);
