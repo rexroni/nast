@@ -20,7 +20,7 @@ static void writable_add_link(struct writable *w, struct writable_heap *link){
 // add to the ring buffer (must already fit in ring buffer)
 static void writable_add_ring(struct writable *w, const char *s, size_t n){
     // check maximum size of copy
-    size_t cp_lim = sizeof(w->ring) - w->start;
+    size_t cp_lim = sizeof(w->ring) - w->end;
     if(n < cp_lim){
         memcpy(&w->ring[w->end], s, n);
     }else{
