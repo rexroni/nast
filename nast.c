@@ -1781,6 +1781,26 @@ void tscrollup(Term *t, int top, int bot, int n, bool break_line_id){
     // step 3: modify the new top line group's line_id, moving downwards
     mod_line_group(t, term2abs(t, top), +1);
     if(break_line_id) t->scr->new_line_id_on_write = true;
+    // step 4: modify the selection accordingly
+    if(!t->sel_type) return; // no selection
+    size_t topabs = term2abs(t, top);
+    size_t botabs = term2abs(t, bot);
+    size_t selb_movable = t->sel_yb >= topabs && t->sel_yb <= botabs;
+    size_t sele_movable = t->sel_ye >= topabs && t->sel_ye <= botabs;
+    if(selb_movable != sele_movable){
+        // selection is partly inside, partly outside the margins; break it
+        t->sel_type = 0;
+        return;
+    }
+    if(!selb_movable) return;  // selection not in margins at all
+    if(t->sel_yb < topabs + n){
+        // selection is inside the margins, but would be broken by the move
+        t->sel_type = 0;
+        return;
+    }
+    // selection can be moved!
+    t->sel_yb -= n;
+    t->sel_ye -= n;
 }
 
 // scroll lines downwards in a specified window, cursor stays in place
@@ -1830,6 +1850,26 @@ void tscrolldown(Term *t, int top, int bot, int n, bool break_line_id){
     // step 3: modify the new bottom line group's line_id, moving upwards
     mod_line_group(t, term2abs(t, bot + 1 - n), -1);
     if(break_line_id) t->scr->new_line_id_on_write = true;
+    // step 4: modify the selection accordingly
+    if(!t->sel_type) return; // no selection
+    size_t topabs = term2abs(t, top);
+    size_t botabs = term2abs(t, bot);
+    size_t selb_movable = t->sel_yb >= topabs && t->sel_yb <= botabs;
+    size_t sele_movable = t->sel_ye >= topabs && t->sel_ye <= botabs;
+    if(selb_movable != sele_movable){
+        // selection is partly inside, partly outside the margins; break it
+        t->sel_type = 0;
+        return;
+    }
+    if(!selb_movable) return;  // selection not in margins at all
+    if(t->sel_ye + n > botabs){
+        // selection is inside the margins, but would be broken by the move
+        t->sel_type = 0;
+        return;
+    }
+    // selection can be moved!
+    t->sel_yb += n;
+    t->sel_ye += n;
 }
 
 struct rgb24
