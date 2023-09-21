@@ -1608,9 +1608,6 @@ tclearregion_abs(Term *t, int x1, int y1, int x2, int y2)
         rline_unrender(rline);
 
         for (x = x1; x <= x2; x++) {
-            // TODO:SELECTIONS
-            // if (selected(t, x, y))
-            //     selclear(t);
             rline->glyphs[x] = (Glyph){
                 // default rune is ' ' so that cursor-on-empty-space works
                 .u = ' ',
@@ -1627,6 +1624,13 @@ tclearregion_abs(Term *t, int x1, int y1, int x2, int y2)
             rline->maxwritten = x1;
         }
     }
+
+    // is selection before cleared region?
+    if(t->sel_ye < y1 || (t->sel_ye == y1 && t->sel_xe < x1)) return;
+    // is selection after cleared region?
+    if(t->sel_ye < y1 || (t->sel_ye == y1 && t->sel_xe < x1)) return;
+    // any overlap breaks the selection
+    t->sel_type = 0;
 }
 
 void
