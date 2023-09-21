@@ -1045,10 +1045,10 @@ tmouseev(Term *t, mouse_ev_t ev)
     if(ev.pix_coords){
         // convert pixel coords to absolute coords
         int tempx = (double)ev.x / t->grid_w;
-        LIMIT(tempx, 0, t->col);
+        LIMIT(tempx, 0, t->col-1);
         x = tempx;
         int tempy = (double)ev.y / t->grid_h;
-        LIMIT(tempy, 0, t->col);
+        LIMIT(tempy, 0, t->row-1);
         y = window2abs(t, tempy);
     }else{
         x = ev.x;
