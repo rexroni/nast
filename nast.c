@@ -194,7 +194,8 @@ struct Term {
     size_t last_press_x;
     size_t last_press_y;
     int last_press_type; // 0=none, 1=click, 2=doubleclick, 3=tripleclick
-    // selection: modified dynamically while mouse is pressed, or modified
+    /* selection: modified dynamically while mouse is pressed, or modified by
+       shift+click.  Reflects the snapped values, not the raw mouse values. */
     size_t sel_xb;
     size_t sel_yb;
     size_t sel_xe;
@@ -1673,6 +1674,15 @@ tdeletechar(Term *t, int n)
     tclearregion_term(t, t->col-n, t->c.y, t->col-1, t->c.y);
 }
 
+static void temit_break_selection(Term *t, int x, size_t y, bool insert){
+    if(!t->sel_type) return;
+    if(y < t->sel_yb) return;
+    if(y == t->sel_yb && x < t->sel_xb && !insert) return;
+    if(y > t->sel_ye) return;
+    if(y == t->sel_ye && x > t->sel_xe) return;
+    t->sel_type = 0;
+}
+
 void
 tinsertblank(Term *t, int n)
 {
@@ -1711,6 +1721,9 @@ tinsertblank(Term *t, int n)
             .bg = t->c.attr.bg,
         };
     }
+
+    // break selection, identical to temit's selection breaking
+    temit_break_selection(t, x, term2abs(t, t->c.y), true);
 }
 
 // replace the line_ids of the contiguous group at y with a new line_id
@@ -3425,8 +3438,12 @@ temit(Term *t, Rune u, int width)
 
     if(IS_SET(t, MODE_INSERT)){
         rline_insert_glyph(rline, t->c.x, g);
+        // break selection if it is on or after cursor
+        temit_break_selection(t, t->c.x, term2abs(t, t->c.y), true);
     }else{
         rline_set_glyph(rline, t->c.x, g);
+        // break selection if it is on cursor
+        temit_break_selection(t, t->c.x, term2abs(t, t->c.y), false);
     }
 
     // {
@@ -3443,7 +3460,6 @@ temit(Term *t, Rune u, int width)
     //     }
     //     printf("), maxwritten=%zu\n", rline->maxwritten);
     // }
-
 
     // were we supposed to set the line id?
     if(t->scr->new_line_id_on_write){
