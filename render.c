@@ -340,6 +340,14 @@ static gboolean on_key_event(
         return FALSE;
     }
 
+    /* intercept copy too, that shouldn't be subject to things like modkeymap,
+       since there's no path by which an application could invoke this
+       functionality */
+    if(key == 'C' && mods == (CTRL_MASK | SHIFT_MASK)){
+        texportselection(g->term, 1);
+        return FALSE;
+    }
+
     key_ev_t ev = { key, mods };
     bool redraw = tkeyev(g->term, ev);
     if(redraw) gtk_widget_queue_draw(g->darea);

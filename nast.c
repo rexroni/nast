@@ -748,7 +748,7 @@ ttailspace(Term *t, size_t y)
     return 0;
 }
 
-static void
+void
 texportselection(Term *t, int clipboard)
 {
     if(!t->sel_type) return;
@@ -849,10 +849,6 @@ tkeyev(Term *t, key_ev_t ev)
         case KEY_ACTION_SHIFT_PGDN:
             twindowmv(t, -t->row + 1);
             return true;
-
-        case KEY_ACTION_COPY:
-            texportselection(t, 1);
-            return false;
     }
     return false;
 }

@@ -167,6 +167,8 @@ void ttyhangup(pid_t);
 int ttynew(Term *t, pid_t *pid, char **cmd);
 size_t ttyread(Term *t);
 
+void texportselection(Term *t, int clipboard);
+
 // returns true if the event should cause a rerender
 bool tkeyev(Term *t, key_ev_t ev);
 bool tmouseev(Term *t, mouse_ev_t ev);
