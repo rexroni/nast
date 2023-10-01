@@ -350,6 +350,10 @@ static inline size_t abs2window(Term *t, size_t idx){
     return t->scr->len - t->row - t->scr->window_off + idx;
 }
 
+static inline size_t scrwin2abs(Term *t, Screen *scr, size_t idx){
+    return idx + (scr->len - t->row - scr->window_off);
+}
+
 static inline size_t window2abs(Term *t, size_t idx){
     return idx + (t->scr->len - t->row - t->scr->window_off);
 }
@@ -729,6 +733,24 @@ ttyread(Term *t)
     return ret;
 }
 
+// set the window offset, and unrender any lines that are no longer showing
+static void tsetwindowoff(Term *t, Screen *scr, size_t window_off){
+    if(scr->window_off == window_off) return;
+
+    size_t oldmin = scrwin2abs(t, scr, 0);
+    size_t oldmax = scrwin2abs(t, scr, t->row);
+
+    scr->window_off = window_off;
+
+    size_t newmin = scrwin2abs(t, scr, 0);
+    size_t newmax = scrwin2abs(t, scr, t->row);
+
+    for(size_t i = oldmin; i < oldmax; i++){
+        if(i >= newmin && i < newmax) continue;
+        rline_unrender(get_rline(scr, i));
+    }
+}
+
 // returns if line y is the end of a line group
 static bool
 tgroupend(Term *t, size_t y)
@@ -817,10 +839,10 @@ tkeyev(Term *t, key_ev_t ev)
             if((map[0].mask & ALTIFY) && (ALT_MASK & mods)){
                 Rune r = text[0];
                 len = utf8encode(r + 128, buf);
-                t->scr->window_off = 0;
+                tsetwindowoff(t, t->scr, 0);
                 t->hooks->ttywrite(t->hooks, buf, len);
             }else{
-                t->scr->window_off = 0;
+                tsetwindowoff(t, t->scr, 0);
                 t->hooks->ttywrite(t->hooks, text, len);
             }
             return true;
@@ -837,7 +859,7 @@ tkeyev(Term *t, key_ev_t ev)
             if(ilen < 1){
                 fprintf(stderr, "failed to sprintf(%s, %d)\n", fmt, mod_idx);
             }else{
-                t->scr->window_off = 0;
+                tsetwindowoff(t, t->scr, 0);
                 t->hooks->ttywrite(t->hooks, buf, (size_t)ilen);
             }
             return true;
@@ -2394,7 +2416,7 @@ csihandle(Term *t)
                 t->scr->start = rlines_idx(t->scr, 1);
                 t->scr->len--;
                 // reset scroll and selection
-                t->scr->window_off = 0;
+                tsetwindowoff(t, t->scr, 0);
                 t->sel_type = 0;
                 t->last_press_x = 0;
                 t->last_press_x = 0;
@@ -3878,11 +3900,11 @@ tresize(Term *t, int col, int row)
     }
 
     /* TODO: Deal with window_off at some point.
-        - if window_off = 0, let it stay zero
+        - if window_off == 0, let it stay zero
         - otherwise try to keep the top line as the top line */
     // TODO: deal with window_off in altscreen too
     // (until then, just make sure window_off is always valid)
-    t->scr->window_off = 0;
+    tsetwindowoff(t, t->scr, 0);
 
     /* current cursor only: Discard lines in the buffer that are so low that
        the cursor would have to move downwards.
@@ -3945,7 +3967,7 @@ bool twindowmv(Term *t, int n){
         (int)(t->scr->len - t->row - t->scr->window_off)
     );
     if(!n) return false;
-    t->scr->window_off += n;
+    tsetwindowoff(t, t->scr, t->scr->window_off + n);
     return true;
 }
 
