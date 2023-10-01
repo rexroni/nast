@@ -158,6 +158,8 @@ void tnew(
     char *delims,
     THooks *hooks
 );
+// child process must already be gone
+void tfree(Term *t);
 int trows(Term *t);
 int tsetfont(Term *t, char *font_name, int font_size);
 void tresize(Term *t, int, int);

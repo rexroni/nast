@@ -1358,6 +1358,25 @@ tnew(
     *tout = t;
 }
 
+void tfree(Term *t){
+    for(size_t i = 0; i < t->main.len; i++){
+        RLine *rline = get_rline(&t->main, i);
+        rline_free(&rline);
+    }
+    free(t->main.rlines);
+
+    for(size_t i = 0; i < t->alt.len; i++){
+        RLine *rline = get_rline(&t->alt, i);
+        rline_free(&rline);
+    }
+    free(t->alt.rlines);
+
+    free(t->tabs);
+    free(t->delims);
+    pango_font_description_free(t->desc);
+    free(t);
+}
+
 int trows(Term *t){
     return t->row;
 }
@@ -3958,6 +3977,7 @@ void rline_free(RLine **rline){
         (*rline)->srfc = NULL;
     }
 
+    free((*rline)->glyphs);
     free(*rline);
     *rline = NULL;
 }

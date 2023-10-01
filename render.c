@@ -5,6 +5,7 @@
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <fcntl.h>
 
 #include "nast.h"
 #include "writable.h"
@@ -32,6 +33,11 @@ typedef struct {
     GIOChannel *wr_ttychan;
     GtkClipboard *primary;
     GtkClipboard *clipboard;
+
+    // pipe to close when it's time to exit
+    int ctrl_w;
+    // did we kill things?
+    bool killed;
 } globals_t;
 
 // sigchld needs to know the globals I guess?
@@ -177,7 +183,6 @@ void ttywrite(globals_t *g, const char *s, size_t n, int may_echo){
 static gboolean on_draw_event(GtkWidget *widget, cairo_t *cr,
         gpointer user_data){
     globals_t *g = user_data;
-    (void)g;
 
     int w = gtk_widget_get_allocated_width(widget);
     int h = gtk_widget_get_allocated_height(widget);
@@ -564,6 +569,7 @@ static gboolean tty_write(GIOChannel *src, globals_t *g){
 
 static gboolean tty_io(GIOChannel *src, GIOCondition cond, gpointer user_data){
     globals_t *g = user_data;
+    if(g->killed) return FALSE;
 
     switch(cond){
         case G_IO_OUT:
@@ -585,6 +591,17 @@ static gboolean tty_io(GIOChannel *src, GIOCondition cond, gpointer user_data){
 
     // this event source should not be removed.
     return TRUE;
+}
+
+static gboolean ctrl_io(
+    GIOChannel *src, GIOCondition cond, gpointer user_data
+){
+    (void)user_data;
+
+    // we only write to cause a quit
+    gtk_main_quit();
+
+    return FALSE;
 }
 
 void prep_channel(GIOChannel *chan){
@@ -628,19 +645,47 @@ void sigchld(int a){
     int stat;
     pid_t p;
 
-    /* TODO: in the case of multiple children, react differently based on which
-             one die died */
     if ((p = waitpid(-1, &stat, WNOHANG)) < 0)
-        die("wait() after SIGCHLD failed: %s\n", strerror(errno));
+        fprintf(stderr, "wait() after SIGCHLD failed: %s\n", strerror(errno));
 
     if (p != G->pid)
         return;
 
-    if (WIFEXITED(stat) && WEXITSTATUS(stat))
-        die("child exited with status %d\n", WEXITSTATUS(stat));
+    if (WIFEXITED(stat))
+        fprintf(stderr, "shell exited %d\n", WEXITSTATUS(stat));
     else if (WIFSIGNALED(stat))
-        die("child terminated due to signal %d\n", WTERMSIG(stat));
-    exit(0);
+        fprintf(stderr, "shell terminated due to signal %d\n", WTERMSIG(stat));
+
+    close(G->ctrl_w);
+}
+
+int addflags(int fd, int flags){
+    // read end is nonblocking
+    int ret = fcntl(fd, F_GETFL);
+    if(ret == -1){
+        perror("fcntl(F_GETFL)");
+        return 1;
+    }
+
+    int cur = ret & O_ACCMODE;
+    ret = fcntl(fd, F_SETFL, cur | flags);
+    if(ret == -1){
+        perror("fcntl(F_SETFL)");
+        return 1;
+    }
+
+    return 0;
+}
+
+static gboolean on_destroy(GtkWidget* self, gpointer user_data){
+    globals_t *g = user_data;
+
+    // stop listening to
+    g->killed = true;
+    int ret = kill(g->pid, SIGKILL);
+    if(ret) perror("kill");
+
+    return FALSE;
 }
 
 int main(int argc, char *argv[]){
@@ -672,7 +717,7 @@ int main(int argc, char *argv[]){
 
     // GTK input handling: developer.gnome.org/gtk3/stable/chap-input-handling.html
     g_signal_connect(G_OBJECT(g.darea), "draw", G_CALLBACK(on_draw_event), &g);
-    g_signal_connect(G_OBJECT(g.window), "destroy", G_CALLBACK(gtk_main_quit), &g);
+    g_signal_connect(G_OBJECT(g.window), "destroy", G_CALLBACK(on_destroy), &g);
 
     // // get keypresses from the drawing area (does not work)
     // gtk_widget_add_events(GTK_WIDGET(g.darea), GDK_KEY_PRESS_MASK);
@@ -736,7 +781,33 @@ int main(int argc, char *argv[]){
     guint rd_event_src_id = g_io_add_watch(ttychan, cond, tty_io, &g);
     (void)rd_event_src_id;
 
+    // add a pipe-based control channel for event-loop-friendly signal handling
+    int pipes[2];
+    int ret = pipe(pipes);
+    if(ret){
+        perror("pipe2");
+        return 1;
+    }
+    int ctrl_r = pipes[0];
+    g.ctrl_w = pipes[1];
+
+    // read end is nonblocking
+    ret = addflags(ctrl_r, O_CLOEXEC | O_NONBLOCK);
+    if(ret) return 1;
+    // write end doesn't atter
+    ret = addflags(g.ctrl_w, O_CLOEXEC);
+    if(ret) return 1;
+
+    // add the control fd to the main loop
+    GIOChannel *ctrl_chan = g_io_channel_unix_new(ctrl_r);
+    if(!ctrl_chan) die("g_io_channel_unix_new()\n");
+    prep_channel(ctrl_chan);
+    rd_event_src_id = g_io_add_watch(ctrl_chan, cond, ctrl_io, &g);
+    (void)rd_event_src_id;
+
     gtk_main();
+
+    tfree(g.term);
 
     return 0;
 }
