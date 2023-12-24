@@ -646,14 +646,6 @@ execsh(char **cmd)
     signal(SIGALRM, SIG_DFL);
 
     // execvp("/bin/sh", (char*[]){"/bin/sh", NULL});
-    FILE *f = fopen("log", "w");
-    fprintf(f, "executing:");
-    char **ptr = cmd;
-    while(*ptr){
-        fprintf(f, " %s", *(ptr++));
-    }
-    fprintf(f, "\n");
-    fflush(f);
     execvp(cmd[0], cmd);
     _exit(1);
 }
