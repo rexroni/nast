@@ -1729,7 +1729,7 @@ tinsertblank(Term *t, int n)
 {
     int x = t->c.x;
     LIMIT(n, 0, t->col - t->c.x);
-    RLine *rline = get_rline(t->scr, t->c.y);
+    RLine *rline = get_rline(t->scr, term2abs(t, t->c.y));
     size_t len = rline->maxwritten;
 
     // are there glyphs to right-shift?
